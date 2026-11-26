@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PoliBOT Sentry - Web Control Panel</title>
+<link rel="icon" type="image/webp" href="/logo.webp">
+<link rel="stylesheet" href="/ui.css">
+<link rel="stylesheet" href="/panel.css">
+<script src="/theme.js"></script>
+</head>
+<body>
+
+<!-- Login Modal -->
+<div id="login-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div style="text-align: center; margin-bottom: 20px;">
+      <img src="/logo.webp" alt="PoliBOT ESP32-S3 logo" width="88" height="120" style="display:block; margin: 0 auto 8px;">
+      <h2 style="font-size: 1.4rem;">PoliBOT Sentry Login</h2>
+      <p style="font-size: 0.85rem; color: var(--dim); margin-top: 4px;">ESP32-S3 Secure Management Access <span class="app-version"></span></p>
+    </div>
+    <form onsubmit="performLogin(); return false;">
+    <div class="form-group">
+      <label for="login-username">Username</label>
+      <input type="text" id="login-username" class="form-control" placeholder="admin" autocomplete="username" autocapitalize="none">
+    </div>
+    <div class="form-group">
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" class="form-control" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <div id="login-err" style="color:var(--alarm); font-size:0.85rem; margin-bottom:12px; display:none;"></div>
+    <button type="submit" class="btn btn-primary btn-block" data-icon="signin">Sign In</button>
+    </form>
+    <p style="font-size:0.75rem; color:var(--dim); text-align:center; margin-top:14px;">
+      First sign-in: <code>admin</code> / <code>polibotadmin</code>. You are then asked to choose your own password.<br><a href="/" style="color:var(--accent-ink);">← Back to home</a>
+    </p>
+  </div>
+</div>
+
+<!-- The default password is public: it only serves to replace it -->
+<div id="password-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h2 style="font-size: 1.3rem; margin-bottom: 8px;">Choose a New Password</h2>
+    <p style="font-size:0.85rem; color:var(--dim); margin-bottom:16px;">This account still has the default password. Choose your own to continue; it also works for <code>login</code> on IRC.</p>
+    <form onsubmit="forcePasswordChange(); return false;">
+    <div class="form-group">
+      <label for="force-current">Current Password</label>
+      <input type="password" id="force-current" class="form-control" autocomplete="current-password">
+    </div>
+    <div class="form-group">
+      <label for="force-new">New Password (no spaces)</label>
+      <input type="password" id="force-new" class="form-control" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label for="force-repeat">Repeat New Password</label>
+      <input type="password" id="force-repeat" class="form-control" autocomplete="new-password">
+    </div>
+    <div id="force-err" role="alert" style="color:var(--alarm); font-size:0.85rem; margin-bottom:12px; display:none;"></div>
+    <button type="submit" class="btn btn-primary btn-block" data-icon="check">Save and Continue</button>
+    </form>
+    <p style="font-size:0.75rem; text-align:center; margin-top:14px;"><a href="#" onclick="performLogout(); return false;" style="color:var(--accent-ink);">Sign out</a></p>
+  </div>
+</div>
+
+<header class="navbar">
+  <div class="brand">
+    <img src="/logo.webp" alt="PoliBOT ESP32-S3 logo" width="53" height="72">
+    <div class="brand-title">
+      <h1>PoliBOT Sentry<span id="led-dot" class="led-dot" role="img" aria-label="Status LED"></span></h1>
+      <p>ESP32-S3 Native IRC Guardian &amp; Security Bot · <span class="app-version"></span></p>
+    </div>
+  </div>
+  <nav class="nav-links" aria-label="Main">
+    <a class="btn" href="/" data-icon="home">Home</a>
+    <a class="btn" href="/panel" aria-current="page" data-icon="panel">Control Panel</a>
+  </nav>
+  <div class="account">
+    <span class="user-badge" data-icon="user"><span id="user-profile-badge">Not signed in</span></span>
+    <button class="btn" data-icon="signout" onclick="performLogout()">Sign Out</button>
+  </div>
+  <button type="button" class="btn theme-toggle" data-icon="theme" onclick="toggleTheme()" aria-label="Switch between light and dark" title="Light or dark"></button>
+</header>
+<div class="toolbar" role="toolbar" aria-label="Device actions">
+  <span class="toolbar-label">Device</span>
+  <button class="btn" data-icon="zap" onclick="rehashConfig()">Rehash</button>
+  <button class="btn" data-icon="refresh" onclick="reconnectIRC()">Reconnect IRC</button>
+  <button class="btn btn-red btn-end" data-icon="power" onclick="rebootESP()">Reboot</button>
+</div>
+
+<div class="status-grid">
+  <div class="card">
+    <div class="card-label">IRC Connection</div>
+    <div class="card-value" id="stat-irc">...</div>
+    <div style="font-size: 0.8rem; color: var(--dim); margin-top: 4px;" id="stat-server">-</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Uptime</div>
+    <div class="card-value" id="stat-uptime">00:00:00</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Free RAM</div>
+    <div class="card-value" id="stat-ram">...</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Active Channels</div>
+    <div class="card-value" id="stat-channels" style="font-size: 1rem; margin-top: 4px;">-</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Local Time & NTP</div>
+    <div class="card-value" id="stat-time" style="font-size: 1.02rem;">--:--:--</div>
+    <div style="font-size: 0.8rem; color: var(--dim); margin-top: 4px;" id="stat-tz">-</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="btn tab-btn active" data-icon="terminal" onclick="switchTab('tab-console')">Console & Logs</button>
+  <button class="btn tab-btn" data-icon="hash" onclick="switchTab('tab-channels')">Channel Sentry & +l</button>
+  <button class="btn tab-btn" data-icon="users" onclick="switchTab('tab-users')">Admin & Users</button>
+  <button class="btn tab-btn" data-icon="server" onclick="switchTab('tab-irc')">IRC Settings</button>
+  <button class="btn tab-btn" data-icon="shield" onclick="switchTab('tab-guardian')">Guardian Rules</button>
+  <button class="btn tab-btn" data-icon="bot" onclick="switchTab('tab-bot')">Bot Behaviour</button>
+  <button class="btn tab-btn" data-icon="wifi" onclick="switchTab('tab-wifi')">WiFi Setup</button>
+  <button class="btn tab-btn" data-icon="clock" onclick="switchTab('tab-ntp')">NTP & Timezone</button>
+  <button class="btn tab-btn" data-icon="bulb" onclick="switchTab('tab-led'); loadLedSettings()">Status LED</button>
+  <button class="btn tab-btn" data-icon="chip" onclick="switchTab('tab-ota'); loadOtaStatus()">Firmware &amp; Backup</button>
+</div>
+
+<!-- Tab: Console & Live Logs -->
+<div id="tab-console" class="tab-content active">
+  <div class="card">
+    <div class="card-head">
+      <h3 style="font-size: 1rem;">Live Sentry Event Logs</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="log-filter" class="form-control" style="width:auto; min-height: 36px; padding: 4px 8px; font-size: 0.75rem;" aria-label="Which lines to show" onchange="renderLogs()">
+          <option value="">All lines</option>
+          <option value="problem">Problems</option>
+          <option value="moderation">Moderation</option>
+          <option value="security">Security</option>
+          <option value="channel">Channels</option>
+          <option value="connection">Connections</option>
+          <option value="command">Console</option>
+          <option value="system">System</option>
+        </select>
+        <button class="btn btn-sm" data-icon="trash" onclick="clearLogs()">Clear</button>
+      </div>
+    </div>
+    <div id="terminal" class="terminal-box"></div>
+    <div class="console-input-row">
+      <select id="console-network" class="form-control" style="width:auto;" aria-label="IRC network"></select>
+      <input type="text" id="cmd-input" class="form-control" placeholder="Enter command (e.g. !help, !status, !dynlimit #chan on 3) or raw IRC command">
+      <button class="btn btn-primary" data-icon="send" onclick="sendConsoleCmd()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Channel Sentry & Floating Limit -->
+<div id="tab-channels" class="tab-content">
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h3>Channel Controls & Floating Limit (+l)</h3>
+        <p style="font-size: 0.82rem; color: var(--dim); margin-top: 4px;">
+          Dynamic limit automatically adjusts +l to (users + free slots), blocking massive botnet flood joins.
+        </p>
+      </div>
+      <button class="btn" data-icon="refresh" onclick="refreshChannels()">Refresh Channels</button>
+    </div>
+    <div class="console-input-row" style="margin: 0 0 14px;">
+      <select id="new-channel-network" class="form-control" style="width:auto;" aria-label="Network for the new channel"></select>
+      <input type="text" id="new-channel" class="form-control" placeholder="#channel to join" aria-label="Channel to join" onkeydown="if (event.key === 'Enter') addChannel()">
+      <input type="password" id="new-channel-key" class="form-control" placeholder="password, if it has one" aria-label="Channel password" autocomplete="new-password" onkeydown="if (event.key === 'Enter') addChannel()">
+      <button class="btn btn-primary" data-icon="plus" onclick="addChannel()">Add Channel</button>
+    </div>
+    <div id="channels-container"></div>
+  </div>
+</div>
+
+<!-- Tab: Users & Admins -->
+<div id="tab-users" class="tab-content">
+  <div class="card">
+    <h3 style="margin-bottom: 12px;">Change My Password</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="pw-current">Current Password</label>
+        <input type="password" id="pw-current" class="form-control" autocomplete="current-password">
+      </div>
+      <div class="form-group">
+        <label for="pw-new">New Password (no spaces)</label>
+        <input type="password" id="pw-new" class="form-control" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label for="pw-repeat">Repeat New Password</label>
+        <input type="password" id="pw-repeat" class="form-control" autocomplete="new-password">
+      </div>
+    </div>
+    <button class="btn btn-primary" data-icon="key" onclick="changePassword()">Change Password</button>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h3>User Accounts & Role Permissions</h3>
+        <p style="font-size: 0.82rem; color: var(--dim); margin-top: 4px;">
+          Manage administrators, moderators, and users with salted SHA-256 password security and per-channel roles.
+        </p>
+      </div>
+      <button class="btn" data-icon="refresh" onclick="loadUsers()">Reload Users</button>
+    </div>
+    <div id="user-list-container"></div>
+    <hr style="border-color: var(--border); margin: 20px 0;">
+    <h4 style="font-size: 1rem; margin-bottom: 12px;">Add or Update User Account</h4>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="usr-name" class="form-control" placeholder="e.g. alice">
+      </div>
+      <div class="form-group">
+        <label>Password (Salted SHA-256)</label>
+        <input type="password" id="usr-pwd" class="form-control" placeholder="Enter password (leave blank to keep unchanged)">
+      </div>
+      <div class="form-group">
+        <label>Global Role</label>
+        <select id="usr-global-role" class="form-control">
+          <option value="user">User (Normal)</option>
+          <option value="mod">Moderator (Global)</option>
+          <option value="admin">Administrator (Global)</option>
+          <option value="owner">Owner (Full Device Access)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Per-Channel Roles (e.g. #polibot: mod, #chat: admin)</label>
+        <input type="text" id="usr-chan-roles" class="form-control" placeholder="#chan1: mod, SekurNet/#chan2: admin">
+      </div>
+      <div class="form-group" style="grid-column: 1 / -1;">
+        <label>Allowed Hostmasks (comma separated)</label>
+        <input type="text" id="usr-hostmasks" class="form-control" value="*!*@*" placeholder="*!*@*, *!alice@*.org">
+        <p style="font-size:0.78rem; color:var(--dim); margin-top:6px;">
+          A mask naming a host, e.g. <code>*!alice@home.example.org</code> or <code>*!*@home.example.org</code>, is trusted <strong>without a password</strong> (auto-op for admins).
+          With any other, such as <code>*!*@*</code> or <code>*!alice@*</code>, the user must log in (<code>/msg bot login &lt;password&gt;</code>): anyone can choose a nickname or ident.
+        </p>
+      </div>
+      <div class="form-group" style="grid-column: 1 / -1;">
+        <label for="usr-accounts">Services Accounts (network/account, comma separated)</label>
+        <input type="text" id="usr-accounts" class="form-control" placeholder="SekurNet/alice">
+        <p style="font-size:0.78rem; color:var(--dim); margin-top:6px;">
+          Whoever is signed in to services (NickServ) with this account on that network is this user, <strong>without a password in the bot</strong>. Works where the server reports accounts (see IRC Settings).
+        </p>
+      </div>
+    </div>
+    <button class="btn btn-primary" data-icon="save" onclick="saveUserAccount()">Save User Account</button>
+  </div>
+</div>
+
+<!-- Tab: IRC Configuration -->
+<div id="tab-irc" class="tab-content">
+  <div class="card">
+    <h3>IRC Networks</h3>
+    <p style="font-size: 0.82rem; color: var(--dim); margin: 4px 0 14px;">
+      Each network is its own connection with its own channels (up to 4). A new nickname or channel list applies without disconnecting; other server settings reconnect that network automatically.
+    </p>
+    <div class="console-input-row" style="margin: 0 0 14px;">
+      <select id="irc-net-select" class="form-control" aria-label="Network to edit" onchange="selectNetwork(this.value)"></select>
+      <button id="irc-add" class="btn btn-primary" data-icon="plus" onclick="newNetwork()">New Network</button>
+      <button id="irc-delete" class="btn btn-red" data-icon="trash" onclick="deleteNetwork()">Delete</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Network Name</label>
+        <input type="text" id="irc-name" class="form-control" placeholder="e.g. SekurNet" maxlength="32">
+      </div>
+      <div class="form-group">
+        <label>Server Host</label>
+        <input type="text" id="irc-host" class="form-control" placeholder="irc.SekurNet.org">
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" id="irc-port" class="form-control" min="1" max="65535">
+      </div>
+      <div class="form-group">
+        <label>Use SSL / TLS</label>
+        <select id="irc-ssl" class="form-control">
+          <option value="false">Plain (false)</option>
+          <option value="true">SSL / TLS (true)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Verify TLS Certificate</label>
+        <select id="irc-ssl-verify" class="form-control">
+          <option value="true">Yes (public servers)</option>
+          <option value="false">No (self-signed / LAN)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Bot Nickname</label>
+        <input type="text" id="irc-nick" class="form-control">
+      </div>
+      <div class="form-group">
+        <label for="irc-alt-nick">Alternative Nickname (if taken)</label>
+        <input type="text" id="irc-alt-nick" class="form-control" placeholder="e.g. PoliBOT_">
+      </div>
+      <div class="form-group">
+        <label>Ident / Username</label>
+        <input type="text" id="irc-ident" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>Real Name</label>
+        <input type="text" id="irc-realname" class="form-control">
+      </div>
+      <div class="form-group">
+        <label for="irc-account">Services Account (if not the nickname)</label>
+        <input type="text" id="irc-account" class="form-control" placeholder="leave empty to use the nickname">
+      </div>
+      <div class="form-group">
+        <label for="irc-nickserv">Services Password (SASL, else NickServ)</label>
+        <input type="password" id="irc-nickserv" class="form-control" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Autojoin Channels (comma separated)</label>
+        <input type="text" id="irc-channels" class="form-control" placeholder="#chan1, #chan2">
+      </div>
+      <div class="form-group">
+        <label for="irc-bot-mode">Bot Mode (+B)</label>
+        <select id="irc-bot-mode" class="form-control">
+          <option value="false">Off</option>
+          <option value="true">On, if the server offers it</option>
+        </select>
+        <p id="bot-mode-status" role="status" style="font-size:0.78rem; color:var(--dim); margin-top:4px;"></p>
+      </div>
+      <div class="form-group">
+        <label>Command Prefix (all networks)</label>
+        <input type="text" id="irc-prefix" class="form-control" style="width: 80px;">
+      </div>
+    </div>
+    <h4 style="font-size: 1rem; margin: 6px 0 4px;">Report Channel</h4>
+    <p style="font-size: 0.82rem; color: var(--dim); margin: 4px 0 14px;">
+      The bot tells your staff there what it does. It sets the channel password (+k) and sends nothing until the server confirms it, so the bot needs operator status there (it gets it by creating the channel). Staff join with <code>/join #channel password</code>.
+    </p>
+    <p id="report-status" role="status" style="font-size: 0.85rem; margin-bottom: 4px;"></p>
+    <p id="account-status" role="status" style="font-size: 0.85rem; margin-bottom: 10px;"></p>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="irc-report">Report Channel (empty = none)</label>
+        <input type="text" id="irc-report" class="form-control" placeholder="#esp32-debug">
+      </div>
+      <div class="form-group">
+        <label for="irc-report-key">Channel Password (up to 23 characters)</label>
+        <input type="password" id="irc-report-key" class="form-control" maxlength="23" autocomplete="new-password">
+      </div>
+    </div>
+    <h4 style="font-size: 1rem; margin: 6px 0 4px;">Server Services</h4>
+    <p style="font-size: 0.82rem; color: var(--dim); margin: 4px 0 14px;">
+      <code>{channel}</code> and <code>{mask}</code> are filled in. Leave a command empty to never send it. Mute mode: <code>+q {mask}</code> (Solanum), <code>+b ~m:{mask}</code> (SekurIRCd), <code>+b m:{mask}</code> (InspIRCd), <code>+b ~quiet:{mask}</code> (UnrealIRCd).
+    </p>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="irc-quiet">Mute Mode</label>
+        <input type="text" id="irc-quiet" class="form-control">
+      </div>
+      <div class="form-group">
+        <label for="irc-ops">Ask for Operator Status</label>
+        <input type="text" id="irc-ops" class="form-control">
+      </div>
+      <div class="form-group">
+        <label for="irc-invite">Ask for an Invitation (invite only)</label>
+        <input type="text" id="irc-invite" class="form-control">
+      </div>
+      <div class="form-group">
+        <label for="irc-unban">Ask to be Unbanned</label>
+        <input type="text" id="irc-unban" class="form-control">
+      </div>
+    </div>
+    <h4 style="font-size: 1rem; margin: 14px 0 4px;"><label for="irc-perform">Commands After Connecting</label></h4>
+    <p style="font-size: 0.82rem; color: var(--dim); margin: 4px 0 10px;">
+      One per line, sent in order each time this network connects, before the channels are joined: <code>/mode -x</code> (the bot's own modes), <code>/msg NickServ ...</code>, or any line the server accepts. <code>{nick}</code> is the bot's nickname. Administrators can read these: keep the services password in its own field above.
+    </p>
+    <textarea id="irc-perform" class="form-control" rows="5" spellcheck="false" autocomplete="off" placeholder="/mode -x" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
+    <button class="btn btn-primary" style="margin-top: 14px;" data-icon="save" onclick="saveNetwork()">Save Network</button>
+  </div>
+</div>
+
+<!-- Tab: Guardian Rules -->
+<div id="tab-guardian" class="tab-content">
+  <div id="guardian-forms"></div>
+  <div class="card">
+    <h3>Auto-Kick List</h3>
+    <p style="font-size: 0.82rem; color: var(--dim); margin: 4px 0 14px;">
+      Anyone matching a mask is banned and kicked on sight (staff accounts are spared). Removing an entry here leaves bans already set on a channel; <code>akick del</code> on IRC lifts them too.
+    </p>
+    <div id="akick-list"></div>
+    <div class="form-grid">
+      <div class="form-group"><label for="akick-network">Network</label><select id="akick-network" class="form-control"></select></div>
+      <div class="form-group"><label for="akick-channel">Channel (empty = all)</label><input type="text" id="akick-channel" class="form-control" placeholder="#channel"></div>
+      <div class="form-group"><label for="akick-mask">Nick or Mask</label><input type="text" id="akick-mask" class="form-control" placeholder="*!*@bad.example"></div>
+      <div class="form-group"><label for="akick-reason">Reason</label><input type="text" id="akick-reason" class="form-control" maxlength="200"></div>
+    </div>
+    <button class="btn btn-primary" data-icon="plus" onclick="addAkick()">Add to List</button>
+  </div>
+</div>
+
+<!-- Tab: Bot Behaviour -->
+<div id="tab-bot" class="tab-content">
+  <div id="bot-forms"></div>
+</div>
+
+<!-- Tab: WiFi Setup -->
+<div id="tab-wifi" class="tab-content">
+  <div class="card">
+    <h3 style="margin-bottom: 8px;">WiFi Connectivity Settings</h3>
+    <p id="wifi-status" role="status" style="font-size: 0.85rem; margin-bottom: 4px;"></p>
+    <p style="font-size: 0.82rem; color: var(--dim); margin-bottom: 14px;">
+      Saved settings apply right away. If the network cannot be joined for 30 seconds, the setup access point opens (when fallback is enabled).
+    </p>
+    <div class="card-head">
+      <div>
+        <h4>Networks Nearby</h4>
+        <p class="hint" style="margin-bottom:0;">Pick one, or type its name below (needed for a hidden network). The connection may stutter for a moment while the device looks.</p>
+        <p class="hint" id="wifi-scan-status" role="status" style="margin-bottom:0;">Press Scan Now to list the networks in range.</p>
+      </div>
+      <button id="wifi-scan" class="btn" data-icon="refresh" onclick="scanWifi()">Scan Now</button>
+    </div>
+    <div id="wifi-networks" class="wifi-list" aria-label="Networks nearby"></div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="wifi-ssid">Station WiFi SSID</label>
+        <input type="text" id="wifi-ssid" class="form-control" maxlength="32" placeholder="Pick above, or type the name" autocapitalize="none" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-group">
+        <label>WiFi Password</label>
+        <input type="password" id="wifi-password" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>Access Point Fallback</label>
+        <select id="wifi-ap-fallback" class="form-control">
+          <option value="true">Enabled</option>
+          <option value="false">Disabled</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>AP SSID</label>
+        <input type="text" id="wifi-ap-ssid" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>AP Password</label>
+        <input type="password" id="wifi-ap-pw" class="form-control">
+      </div>
+    </div>
+    <button class="btn btn-primary" style="margin-top: 14px;" data-icon="save" onclick="saveConfig()">Save WiFi Settings</button>
+  </div>
+</div>
+
+<!-- Tab: NTP & Timezone -->
+<div id="tab-ntp" class="tab-content">
+  <div class="card">
+    <h3 style="margin-bottom: 16px;">NTP Time & Timezone</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>NTP Synchronization</label>
+        <select id="ntp-enabled" class="form-control">
+          <option value="true">Enabled</option>
+          <option value="false">Disabled</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>NTP Server</label>
+        <input type="text" id="ntp-server" class="form-control" placeholder="pool.ntp.org">
+      </div>
+      <div class="form-group">
+        <label>City / Region Preset</label>
+        <select id="ntp-preset" class="form-control" onchange="onTimezonePresetChange()">
+          <option value="custom">Custom</option>
+          <option value="Europe/Madrid|CET-1CEST,M3.5.0,M10.5.0/3">Madrid, Paris, Berlin, Rome</option>
+          <option value="Europe/London|GMT0BST,M3.5.0/1,M10.5.0">London, Dublin, Lisbon</option>
+          <option value="Europe/Athens|EET-2EEST,M3.5.0/3,M10.5.0/4">Athens, Helsinki, Bucharest</option>
+          <option value="America/New_York|EST5EDT,M3.2.0,M11.1.0">New York, Miami, Toronto</option>
+          <option value="America/Chicago|CST6CDT,M3.2.0,M11.1.0">Chicago, Dallas</option>
+          <option value="America/Mexico_City|CST6">Mexico City</option>
+          <option value="America/Denver|MST7MDT,M3.2.0,M11.1.0">Denver, Calgary</option>
+          <option value="America/Los_Angeles|PST8PDT,M3.2.0,M11.1.0">Los Angeles, Vancouver</option>
+          <option value="America/Argentina/Buenos_Aires|&lt;-03&gt;3">Buenos Aires</option>
+          <option value="America/Sao_Paulo|&lt;-03&gt;3">São Paulo</option>
+          <option value="Asia/Dubai|&lt;+04&gt;-4">Dubai</option>
+          <option value="Asia/Kolkata|IST-5:30">New Delhi, Kolkata</option>
+          <option value="Asia/Shanghai|CST-8">Shanghai, Hong Kong, Singapore</option>
+          <option value="Asia/Tokyo|JST-9">Tokyo, Seoul</option>
+          <option value="Australia/Sydney|AEST-10AEDT,M10.1.0,M4.1.0/3">Sydney, Melbourne</option>
+          <option value="UTC|UTC0">UTC</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Location Label</label>
+        <input type="text" id="ntp-location" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>POSIX Timezone String</label>
+        <input type="text" id="ntp-timezone" class="form-control">
+      </div>
+    </div>
+    <button class="btn btn-primary" style="margin-top: 14px;" data-icon="clock" onclick="saveAndSyncNtp()">Save & Synchronize Time</button>
+  </div>
+</div>
+
+<!-- Tab: Status LED -->
+<div id="tab-led" class="tab-content">
+  <div class="card">
+    <h3 style="margin-bottom: 8px;">Status LED</h3>
+    <p style="font-size: 0.82rem; color: var(--dim); margin-bottom: 16px;">
+      The LED on the board, also shown next to the title, blinks slowly in the colour of the connection state. While someone is on the web pages, quick flashes fill the gap between two blinks. Saved changes apply within a second.
+    </p>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="led-enabled">LED Notifications</label>
+        <select id="led-enabled" class="form-control">
+          <option value="true">On</option>
+          <option value="false">Off (the LED stays dark, to save current)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="led-period">Blink Every (seconds)</label>
+        <input type="number" id="led-period" class="form-control" min="1" max="10">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="led-brightness">Brightness: <output id="led-brightness-value" for="led-brightness">-</output> %</label>
+      <input type="range" id="led-brightness" min="0" max="100" step="1" oninput="document.getElementById('led-brightness-value').value = this.value">
+      <p style="font-size:0.78rem; color:var(--dim); margin-top:4px;">0 turns the LED off. Below 4 %, similar colours are hard to tell apart.</p>
+    </div>
+    <div class="form-grid">
+      <div class="form-group led-colour"><input type="color" id="led-no_wifi"><label for="led-no_wifi">No WiFi</label></div>
+      <div class="form-group led-colour"><input type="color" id="led-no_irc"><label for="led-no_irc">WiFi, but no IRC network</label></div>
+      <div class="form-group led-colour"><input type="color" id="led-some_irc"><label for="led-some_irc">Some IRC networks connected</label></div>
+      <div class="form-group led-colour"><input type="color" id="led-all_irc"><label for="led-all_irc">All IRC networks connected</label></div>
+      <div class="form-group led-colour"><input type="color" id="led-panel"><label for="led-panel">Quick flashes: signed in to the web panel</label></div>
+      <div class="form-group led-colour"><input type="color" id="led-visitor"><label for="led-visitor">Quick flashes: someone on the status page</label></div>
+    </div>
+    <p class="hint">The board's red power LED is wired straight to its power supply, so it cannot be switched from here. If its light bothers you, cover it with a piece of opaque tape.</p>
+    <button class="btn btn-primary" data-icon="save" onclick="saveLedSettings()">Save LED Settings</button>
+    <button class="btn" data-icon="undo" onclick="fillLedSettings(ledDefaults)">Show Defaults</button>
+  </div>
+</div>
+
+<!-- Tab: Firmware Update (OTA) -->
+<div id="tab-ota" class="tab-content">
+  <div class="card">
+    <h3 style="margin-bottom: 8px;">Installed Firmware</h3>
+    <div id="ota-info" style="font-family: var(--mono); font-size: 0.85rem; color: var(--dim);">Open this tab as an owner to load firmware details.</div>
+  </div>
+  <div class="card">
+    <h3 style="margin-bottom: 12px;">Upload Firmware File</h3>
+    <div class="form-group">
+      <label for="ota-file">Application image (build/polibot_native.bin)</label>
+      <input type="file" id="ota-file" class="form-control" accept=".bin">
+    </div>
+    <button class="btn btn-orange ota-btn" data-icon="upload" onclick="otaUpload()">Upload & Flash</button>
+  </div>
+  <div class="card">
+    <h3 style="margin-bottom: 12px;">Update From URL</h3>
+    <div class="form-group">
+      <label for="ota-url">Direct link to the .bin file (HTTPS recommended)</label>
+      <input type="url" id="ota-url" class="form-control" placeholder="https://example.com/polibot_native.bin">
+    </div>
+    <button class="btn btn-orange ota-btn" data-icon="download" onclick="otaFromUrl()">Download & Flash</button>
+  </div>
+  <div class="card">
+    <label for="ota-progress" class="card-label" style="display:block;">Update Progress</label>
+    <progress id="ota-progress" max="100" value="0" style="width:100%; height:18px;"></progress>
+    <div id="ota-status" role="status" style="font-size:0.85rem; margin-top:8px;">Idle</div>
+  </div>
+  <div class="card">
+    <h3>Settings Backup (owner)</h3>
+    <p style="font-size: 0.82rem; color: var(--dim); margin: 4px 0 14px;">
+      The file holds your WiFi, services and report channel passwords and the account password hashes: keep it private. Seen history, waiting messages and timed bans are not part of it.
+    </p>
+    <button class="btn btn-primary" data-icon="download" onclick="downloadBackup()">Download Backup</button>
+    <hr style="border-color: var(--border); margin: 20px 0;">
+    <div class="form-group">
+      <label for="restore-file">Restore from a Backup File</label>
+      <input type="file" id="restore-file" class="form-control" accept=".json">
+    </div>
+    <div class="form-group">
+      <label><input type="checkbox" id="restore-keep-wifi" checked> Keep the current WiFi settings</label>
+    </div>
+    <button class="btn btn-orange" data-icon="undo" onclick="restoreBackup()">Restore &amp; Restart</button>
+  </div>
+</div>
+
+<div id="toast" class="alert-toast">Saved!</div>
+
+<script src="/panel_rules.js"></script>
+<script src="/panel_irc.js"></script>
+<script src="/panel_access.js"></script>
+<script src="/panel_users.js"></script>
+<script src="/panel_logs.js"></script>
+<script src="/panel_wifi.js"></script>
+<script src="/panel_system.js"></script>
+<script src="/panel_core.js"></script>
+</body>
+</html>

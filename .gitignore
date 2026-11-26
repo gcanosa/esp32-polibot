@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# ESP-IDF build output
+polibot_native/build/
+polibot_native/sdkconfig
+polibot_native/sdkconfig.old
+polibot_native/managed_components/
+
+# local tool indexes
+.codegraph/
+
+# private keys never belong here; the public update key is the one exception
+*.pem
+*.key
+!polibot_native/main/update_key.pem

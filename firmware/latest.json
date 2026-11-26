@@ -1,0 +1,8 @@
+{
+ "version": "0.1.5",
+ "board": "esp32s3-n16r8",
+ "file": "polibot-0.1.5-update.bin",
+ "size": 1779504,
+ "sha256": "114eeaa88697c65bcca93cab52910a07e2bae1704faaab31d391239e21fe0021",
+ "notes": "First public release: automatic op, half-op and voice lists, timed voice, commands after connecting, security and speed fixes."
+}
