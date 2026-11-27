@@ -1,8 +1,8 @@
 {
- "version": "0.2.0",
+ "version": "0.2.1",
  "board": "esp32s3-n16r8",
- "file": "polibot-0.2.0-update.bin",
- "size": 1791984,
- "sha256": "f7d76e5e38761734fc6406ba567d131f94e90ddc35ebd6cb17ce5a5fa46560eb",
- "notes": "Online updates from the control panel: check by hand or automatically, a notice when there is a new version, and upgrade. Releases are signed."
+ "file": "polibot-0.2.1-update.bin",
+ "size": 2003744,
+ "sha256": "df17de9ceb88d3cbe0d162af48fd14e1c3f11136863bf2a653a23ef59a764d11",
+ "notes": "Restarts itself after a hang, alerts, new IRC commands and spam filters, topic and mode locks, members and bans, user management, polibot.local, trusted proxy, faster panel."
 }
