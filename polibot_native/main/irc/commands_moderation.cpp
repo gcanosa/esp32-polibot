@@ -1,28 +1,36 @@
-// op, voice, half, owner and their "de" forms, kick, topic, quiet, unquiet, ban, unban
+// op, voice, half, owner and their "de" forms, kick, invite, topic, quiet, unquiet, ban, kickban, unban, bans
 #include "irc_client.h"
 #include "irc_internal.h"
 #include "bot_memory.h"
 #include <algorithm>
 
-// quiet, unquiet, ban, unban
+// quiet, unquiet, ban, kickban, unban
 bool IRCClient::ban_command(Command& c) {
     const std::string& cmd = c.name;
     std::vector<std::string>& args = c.args;
-    if (cmd != "quiet" && cmd != "unquiet" && cmd != "ban" && cmd != "unban") return false;
+    const bool kicking = cmd == "kickban" || cmd == "kb";
+    if (cmd != "quiet" && cmd != "unquiet" && cmd != "ban" && cmd != "unban" && !kicking) return false;
 
     std::string ch;
     resolve_channel(c, ch);
     const bool quiet = cmd == "quiet" || cmd == "unquiet";
     const bool adding = cmd.rfind("un", 0) != 0;
     if (!allowed(c, quiet ? "mod" : "admin", ch)) return true;
-    const std::string usage = "Usage: " + cmd + " [#chan] <nick|mask>" + (adding ? " [time, e.g. 30m, 2h, 7d]" : "");
-    if (args.empty() || ch.empty()) {
+    const std::string usage = "Usage: " + cmd + " [#chan] " +
+                              (kicking ? "<nick> [time] [reason]" : std::string("<nick|mask>") + (adding ? " [time, e.g. 30m, 2h, 7d]" : ""));
+    if (args.empty() || ch.empty() || (kicking && args[0].find_first_of("!@$~*?") != std::string::npos)) {
         send_privmsg(c.reply_to, usage);
+        return true;
+    }
+    if (kicking && same(args[0], current_nick())) {
+        send_privmsg(c.reply_to, "I will not kick myself.");
         return true;
     }
     const auto limits = g_settings.get();
     int seconds = (quiet ? limits->quiet_minutes : limits->ban_minutes) * 60;
-    if (adding && args.size() > 1 && !parse_duration(args[1], seconds)) {
+    const bool timed = adding && args.size() > 1 && parse_duration(args[1], seconds);
+    // after "ban" and "quiet" only a time may follow; after "kickban" it may be left out before the reason
+    if (adding && !kicking && args.size() > 1 && !timed) {
         send_privmsg(c.reply_to, usage);
         return true;
     }
@@ -39,8 +47,6 @@ bool IRCClient::ban_command(Command& c) {
             return true;
         }
     }
-    // how this network writes the two kinds, to tell them apart among the recorded ones
-    const std::string quiet_start = cfg->quiet_mode.substr(0, cfg->quiet_mode.find("{mask}"));
     auto change_for = [&](const std::string& mask) { return quiet ? fill_template(cfg->quiet_mode, ch, mask) : "+b " + mask; };
 
     if (adding) {
@@ -49,14 +55,18 @@ bool IRCClient::ban_command(Command& c) {
         send_raw("MODE " + ch + " " + change);
         const bool by_nick = args[0].find_first_of("!@$~*?") == std::string::npos;
         g_memory.bans.add(name_, ch, change, by_nick ? args[0] : "", seconds, bot_clock());
-        confirm(c, ch, "Executed MODE " + ch + " " + change + (seconds ? " (for " + format_duration(seconds) + ")" : ""));
+        if (kicking) { // after the ban, so that they cannot come straight back
+            const size_t reason = timed ? 2 : 1;
+            send_raw("KICK " + ch + " " + args[0] + " :" + (args.size() > reason ? join_words(args, reason) : "Banned"));
+        }
+        confirm(c, ch, "Executed MODE " + ch + " " + change + (seconds ? " (for " + format_duration(seconds) + ")" : "") +
+                       (kicking ? " and kicked " + args[0] : ""));
         return true;
     }
     // lift what the bot set against this nickname; otherwise what the argument stands for
     std::vector<std::string> changes;
     for (const auto& mode : g_memory.bans.for_nick(name_, ch, args[0])) {
-        const bool mute = quiet_start.size() > 1 && quiet_start != "+b " && mode.rfind(quiet_start, 0) == 0;
-        if (mute == quiet) changes.push_back(mode);
+        if (is_mute(mode) == quiet) changes.push_back(mode);
     }
     if (changes.empty()) changes.push_back(change_for(mask_for(args[0])));
     std::string done;
@@ -67,6 +77,42 @@ bool IRCClient::ban_command(Command& c) {
         done += (done.empty() ? "" : ", ") + change;
     }
     confirm(c, ch, "Executed MODE " + ch + " " + done);
+    return true;
+}
+
+// bans: what the bot has set in a channel, told to the asker alone
+bool IRCClient::bans_command(Command& c) {
+    if (c.name != "bans") return false;
+    std::string ch;
+    resolve_channel(c, ch);
+    if (!allowed(c, "mod", ch)) return true;
+    // masks name people's hosts: never listed in the channel
+    const std::string to = c.is_pm || c.reply_to.empty() ? c.reply_to : c.nick;
+    if (ch.empty()) {
+        send_privmsg(to, "Usage: bans [#chan]");
+        return true;
+    }
+    const auto records = g_memory.bans.in_channel(name_, ch);
+    const Clock now = bot_clock();
+    std::vector<std::string> entries;
+    for (const auto& r : records) {
+        const std::string left = r.deadline > 0 ? format_duration(r.deadline - now.steady) + " left"
+                               : r.deadline < 0 ? "timed" : "until lifted";
+        entries.push_back(std::string(r.mode) + (r.nick[0] ? std::string(" (") + r.nick + ", " : " (") + left + ")");
+    }
+    if (entries.empty()) {
+        send_privmsg(to, "I have no bans or mutes on record for " + ch + ".");
+        return true;
+    }
+    // the newest first, a few lines at most
+    std::reverse(entries.begin(), entries.end());
+    size_t next = 0;
+    for (int line = 0; line < 5 && next < entries.size(); line++) {
+        std::string text = (line ? "" : ch + ": ");
+        while (next < entries.size() && (text.size() + entries[next].size() < 380 || text.size() < 80)) text += entries[next++] + "  ";
+        send_privmsg(to, text);
+    }
+    if (next < entries.size()) send_privmsg(to, std::to_string(entries.size() - next) + " more are listed in the web panel.");
     return true;
 }
 
@@ -124,7 +170,7 @@ bool IRCClient::status_command(Command& c) {
     return true;
 }
 
-// kick, topic
+// kick, invite, topic
 bool IRCClient::moderator_command(Command& c) {
     const std::string& cmd = c.name;
     std::vector<std::string>& args = c.args;
@@ -157,6 +203,19 @@ bool IRCClient::moderator_command(Command& c) {
         return true;
     }
 
+    if (cmd == "invite") {
+        std::string ch;
+        resolve_channel(c, ch);
+        if (!allowed(c, "mod", ch)) return true;
+        if (args.size() != 1 || ch.empty()) {
+            send_privmsg(reply_target, "Usage: invite [#chan] <nick>");
+            return true;
+        }
+        send_raw("INVITE " + args[0] + " " + ch);
+        confirm(c, ch, "Invited " + args[0] + " to " + ch);
+        return true;
+    }
+
     if (cmd == "topic") {
         std::string ch;
         resolve_channel(c, ch);
@@ -168,10 +227,15 @@ bool IRCClient::moderator_command(Command& c) {
             send_privmsg(reply_target, "Usage: topic [#chan] <new topic>");
             return true;
         }
-        std::string top = "";
-        for (size_t i = 0; i < args.size(); i++) {
-            if (i > 0) top += " ";
-            top += args[i];
+        const std::string top = join_words(args);
+        ChannelGuardianConfig rules = guardian_.get_channel_config(name_, ch);
+        if (rules.topic_lock) {
+            if (!security_mgr_.has_permission(name_, sender_nick, hostmask, "admin", ch)) {
+                send_privmsg(reply_target, "The topic of " + ch + " is locked: an administrator can change it.");
+                return true;
+            }
+            rules.topic = top;
+            guardian_.save_channel_config(name_, ch, rules);
         }
         send_raw("TOPIC " + ch + " :" + top);
         confirm(c, ch, "Topic updated for " + ch);

@@ -2,6 +2,10 @@
 // ---------------- Rules and behaviour settings ----------------
 const ACTIONS = [['warn', 'Warn'], ['kick', 'Kick'], ['ban', 'Kick & Ban'], ['quiet', 'Mute'], ['escalate', 'Escalate (see below)'], ['report', 'Only report it']];
 
+// the filters of the "spam" section, which start switched off
+const spamAction = (key, label, values) => pick(key, label, [['off', 'Off'], ...ACTIONS.filter(([value]) => values.includes(value))], 'off');
+const MESSAGE_ACTIONS = ['warn', 'kick', 'ban', 'quiet', 'escalate', 'report'];
+
 const bool = (key, label, fallback = true) => ({ key, label, type: 'bool', fallback });
 
 const int = (key, label, min, max, fallback) => ({ key, label, type: 'int', min, max, fallback });
@@ -27,6 +31,19 @@ const FORMS = {
     { title: 'Forbidden Words', section: 'guardian', fields: [
       bool('anti_badwords.enabled', 'Word Filter'), list('anti_badwords.words', 'Words for All Channels (comma separated)'),
       pick('anti_badwords.action', 'Action', ACTIONS, 'kick'), text('anti_badwords.kick_reason', 'Reason Shown', 'Disallowed word')] },
+    { title: 'Links and Channel Adverts', section: 'spam', note: 'Web addresses, and the names of other channels, from people without a staff role.', fields: [
+      spamAction('links_action', 'When Somebody Advertises', MESSAGE_ACTIONS), bool('links_channels', 'Other Channel Names Count Too'),
+      bool('links_spare_voiced', 'Spare Voiced Users'), text('links_allowed', 'Allowed Domains (comma separated)'), text('links_reason', 'Reason Shown')] },
+    { title: 'Mass Highlight', section: 'spam', fields: [
+      spamAction('highlight_action', 'When One Line Names Many Present', MESSAGE_ACTIONS), int('highlight_nicks', 'Nicknames that Are Too Many', 2, 50),
+      text('highlight_reason', 'Reason Shown')] },
+    { title: 'Nickname Change Flood', section: 'spam', fields: [
+      spamAction('nick_action', 'Action', ['kick', 'ban', 'quiet', 'escalate', 'report']), int('nick_changes', 'Changes Allowed', 1, 50),
+      int('nick_seconds', 'Within (seconds)', 5, 600), text('nick_reason', 'Reason Shown')] },
+    { title: 'Join and Part Flood', section: 'spam', note: 'Counts one user\'s joins, parts and quits in a channel; acts when they join once too often.', fields: [
+      spamAction('presence_action', 'Action', ['kick', 'ban', 'quiet', 'report']), int('presence_count', 'Joins and Parts Allowed', 2, 50),
+      int('presence_seconds', 'Within (seconds)', 5, 600), int('presence_minutes', 'Ban or Mute Length (minutes, 0 = until lifted)', 0, 525600),
+      text('presence_reason', 'Reason Shown')] },
     { title: 'Bans, Mutes and Escalation', section: 'moderation', fields: [
       bool('exempt_channel_ops', 'Spare Channel Operators from Filters'),
       pick('mask_style', 'Ban a Nick By', [['host', 'Host (*!*@host)'], ['userhost', 'User and host (*!user@host)'], ['nick', 'Nickname only (easy to evade)']]),
@@ -72,6 +89,21 @@ const FORMS = {
       pick('delivery', 'Deliver Messages', [['private', 'In a private message'], ['notice', 'In a notice'], ['channel', 'In the channel']]),
       int('per_recipient', 'Waiting per Recipient', 1, 20), int('per_sender', 'Waiting per Sender', 1, 50),
       int('max_total', 'Waiting in Total', 1, 150), int('keep_days', 'Discard After (days)', 1, 365)] },
+    { title: 'Topic and Mode Locks', section: 'locks', note: 'What is locked is set per channel under Channels.', fields: [
+      int('reverts_per_minute', 'Most Times Put Back per Minute and Channel', 1, 20)] },
+    { title: 'Reliability', section: 'health', note: 'A device whose IRC connection, main loop or web panel hangs restarts by itself; the event log keeps what led to it.', fields: [
+      int('stuck_minutes', 'Restart When Unresponsive For (minutes, 0 = never)', 0, 60)] },
+    { title: 'Alerts Outside IRC', section: 'alerts', note: 'Sent to a webhook or an ntfy topic, for what the report channel cannot tell. A saved address reads as ********.',
+      extra: { label: 'Send Test Alert', icon: 'send', call: 'testAlert()' }, fields: [
+      text('url', 'Address (https://..., empty = off)'),
+      pick('format', 'Send As', [['text', 'Plain text (ntfy)'], ['json', 'JSON with "text" and "content"']], 'text'),
+      int('offline_minutes', 'A Network Away For (minutes, 0 = never)', 0, 1440), bool('on_fault', 'Restarts After a Fault'),
+      bool('on_low_memory', 'Low Memory (below the limit set under Report Channel)')] },
+    { title: 'Reverse Proxy', section: 'network',
+      note: 'If the panel is reached through your own proxy (Caddy, nginx, ...), enter the address the device sees it connect from: sign-in reports and the lockout then count each visitor. Empty = none.',
+      fields: [text('trusted_proxies', 'Trusted Proxy Addresses (comma separated)')] },
+    { title: 'Local Name', section: 'network', note: 'The panel also opens as http://<name>.local/ on your own network. Empty = off.', fields: [
+      text('mdns_name', 'Name')] },
     { title: 'What Goes to the Report Channel', section: 'report', note: 'The channel and its password are set per network under IRC Settings.', fields: [
       bool('moderation', 'Moderation: kicks, bans, commands used'), bool('raid', 'Raids and Lockdowns'),
       bool('security', 'Sign-Ins and Command Floods'), bool('channel', 'Operator Status and Joining Problems'),
@@ -109,7 +141,10 @@ function renderForms() {
         <h3 style="margin-bottom: 12px;">${esc(card.title)}</h3>
         ${card.note ? `<p style="font-size:0.82rem; color:var(--dim); margin:-6px 0 14px;">${esc(card.note)}</p>` : ''}
         <div class="form-grid">${card.fields.map(f => fieldHtml(card, f)).join('')}</div>
-        <button class="btn btn-primary" data-icon="save" onclick="saveCard('${target}', ${i})">Save ${esc(card.title)}</button>
+        <div class="btn-row">
+          <button class="btn btn-primary" data-icon="save" onclick="saveCard('${target}', ${i})">Save ${esc(card.title)}</button>
+          ${card.extra ? `<button class="btn" data-icon="${card.extra.icon}" onclick="${card.extra.call}">${esc(card.extra.label)}</button>` : ''}
+        </div>
       </div>`).join('');
   }
 }
@@ -151,6 +186,37 @@ async function saveCard(target, index) {
   const part = card.section ? (config[card.section] || {}) : {};
   values.forEach(([k, v]) => writePath(part, k, v));
   if (await postConfig(card.section ? { [card.section]: part } : part)) showToast(`Saved ${card.title}`);
+}
+
+async function testAlert() {
+  const res = await fetch('/api/action', { method: 'POST', headers: authJson(), body: JSON.stringify({ action: 'test_alert' }) });
+  if (res.status === 401) return sessionExpired();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return alert(data.message || 'Could not send a test alert.');
+  showToast(data.message);
+}
+
+// The device says when a request came through a proxy it does not trust
+let seenProxy = '';
+
+function showProxyHint(address) {
+  seenProxy = address || '';
+  document.getElementById('proxy-banner').hidden = !seenProxy;
+  document.getElementById('proxy-banner-text').innerText = seenProxy ? `You seem to be connecting through a proxy at ${seenProxy}.` : '';
+}
+
+async function trustProxy() {
+  const address = seenProxy;
+  if (!confirm(`Trust ${address}? Only if it is your own proxy: whatever it says about visitors' addresses will be believed.`)) return;
+  const res = await fetch('/api/config', { headers: getAuthHeader() });
+  if (res.status === 401) return sessionExpired();
+  if (!res.ok) return alert('Could not read the current configuration.');
+  const network = (await res.json()).network || {};
+  const list = (network.trusted_proxies || '').split(/[, ]+/).filter(a => a && a !== address);
+  network.trusted_proxies = [...list, address].join(', ');
+  if (!await postConfig({ network })) return;
+  showProxyHint('');
+  showToast(`Trusting the proxy at ${address}`);
 }
 
 async function postConfig(body) {

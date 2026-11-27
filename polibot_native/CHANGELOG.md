@@ -4,10 +4,23 @@
 
 ### Added
 - A successful sign-in to the web panel is reported on the report channel as a security report, with the account, its role and the address.
+- Commands `kickban` (`kb`), `invite`, `bans`, `passwd` (change your own password in private), `topiclock` and `modelock`.
+- Filters, all off to begin with, for web addresses and channel adverts, mass highlighting, nickname change floods, and join and part floods (**Guardian Rules**).
+- Topic and mode locks per channel: what is changed is put back.
+- **Members & Bans** on each channel card: who is there, with op, voice, kick and ban buttons, and the bot's bans and mutes with the time left and a button to lift them.
+- **Signed In Now** in **Manage Users**: panel and IRC sessions, with sign-out.
+- A device whose IRC connection, main loop or web panel stops responding restarts by itself.
+- The newest log lines survive a restart or a crash.
+- Alerts to a webhook or an ntfy topic when a network stays away, after a restart caused by a fault, and when memory runs low, with a test button.
+- The panel also opens as `http://polibot.local/` (the name can be changed or switched off).
+- **Trusted Proxy Addresses** for a panel behind a reverse proxy: sign-in reports, the session list and the lockout then use each visitor's address. A notice offers to trust a proxy that is not listed yet.
 - **Manage Users** under **Admin & Users** opens a table of the accounts, with a colour for each role, how the bot recognises each one without a password, search, a role filter and sorting.
 
 ### Changed
 - Channel roles are entered one row each, instead of as one line of text.
+- The firmware is built for speed instead of for debugging.
+- Pages and scripts are sent compressed (about a third of the size), and only again after an update.
+- The panel stops asking for news while it is not on screen, and asks only for new log lines.
 - The foot of the home page shows the author, where to ask and the source code in three labelled columns.
 
 ### Fixed

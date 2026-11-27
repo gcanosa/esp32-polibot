@@ -71,6 +71,37 @@ struct BotSettings {
     // "updates": looking for newer releases (Firmware & Backup)
     bool update_auto_check = false;
     int update_check_hours = 24;
+    // "spam": advertising, mass highlighting, and floods of nick changes or of joins and parts
+    std::string links_action = "off";
+    std::string links_reason = "No advertising here";
+    bool links_channels = true;     // other channels' names count as advertising too
+    bool links_spare_voiced = true;
+    std::string links_allowed;      // domains whose addresses are welcome
+    std::string highlight_action = "off";
+    std::string highlight_reason = "Do not highlight everybody";
+    int highlight_nicks = 6;
+    std::string nick_action = "off";
+    std::string nick_reason = "Nickname change flood";
+    int nick_changes = 4;
+    int nick_seconds = 60;
+    std::string presence_action = "off";
+    std::string presence_reason = "Join and part flood";
+    int presence_count = 6;
+    int presence_seconds = 60;
+    int presence_minutes = 10; // how long its ban or mute lasts
+    // "locks": topic and mode locks, set per channel
+    int lock_reverts = 3; // per minute and channel, so that two bots cannot fight for ever
+    // "health"
+    int stuck_minutes = 5; // restart when the bot stops responding for this long; 0 = never
+    // "alerts": sent outside IRC
+    std::string alert_url; // "" = no alerts
+    std::string alert_format = "text";
+    int alert_offline_minutes = 5; // a network away for this long; 0 = never
+    bool alert_faults = true;
+    bool alert_memory = true;
+    // "network"
+    std::string mdns_name = "polibot"; // answers <name>.local; "" = off
+    std::string trusted_proxies; // addresses whose X-Forwarded-For names the visitor; "" = none
     // "report"
     bool report_moderation = true;
     bool report_raid = true;

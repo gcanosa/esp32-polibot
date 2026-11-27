@@ -39,6 +39,7 @@ async function checkAuth() {
         return false;
       }
       currentUser = me;
+      showProxyHint(me.proxy);
       document.getElementById('login-modal').style.display = 'none';
       const roleStr = currentUser.global_role.toUpperCase();
       document.getElementById('user-profile-badge').innerText = `${currentUser.username} · ${roleStr}`;
@@ -84,7 +85,7 @@ function sessionExpired() {
   localStorage.removeItem('polibot_token');
   currentUser = null;
   document.getElementById('user-profile-badge').innerText = 'Not signed in';
-  document.getElementById('users-dialog').close(); // it would cover the sign-in form
+  document.querySelectorAll('dialog').forEach(d => d.close()); // they would cover the sign-in form
   document.getElementById('login-modal').style.display = 'flex';
 }
 
@@ -228,9 +229,14 @@ async function initApp() {
   }
 }
 
-setInterval(() => { if (currentUser && !otaBusy) fetchStatus(true); }, 3000);
+// nothing is asked while nobody can see the page
+const polling = () => currentUser && !otaBusy && !document.hidden;
 
-setInterval(() => { if (currentUser && !otaBusy) refreshLogs(true); }, 2500);
+setInterval(() => { if (polling()) fetchStatus(true); }, 3000);
+
+setInterval(() => { if (polling()) refreshLogs(true); }, 2500);
+
+document.addEventListener('visibilitychange', () => { if (polling()) { fetchStatus(true); refreshLogs(true); } });
 
 renderForms();
 

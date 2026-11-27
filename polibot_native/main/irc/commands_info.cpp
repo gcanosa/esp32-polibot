@@ -1,4 +1,4 @@
-// login, logout, whoami, help, version, status, time, chanstats
+// login, logout, whoami, passwd, help, version, status, time, chanstats
 #include "irc_client.h"
 #include "irc_internal.h"
 #include "command_help.h"
@@ -53,6 +53,33 @@ bool IRCClient::session_command(Command& c) {
         return true;
     }
     return false;
+}
+
+// passwd: anyone who is identified changes the password of their own account
+bool IRCClient::password_command(Command& c) {
+    if (c.name != "passwd" && c.name != "password") return false;
+    if (c.hostmask == WEB_CONSOLE_HOSTMASK) {
+        send_privmsg(c.reply_to, "In the web panel use Change My Password.");
+        return true;
+    }
+    if (!c.is_pm) {
+        send_privmsg(c.reply_to, c.nick + ": never type a password in a channel. If that was yours, change it now in private.");
+        return true;
+    }
+    UserAccount user;
+    if (!security_mgr_.get_effective_user(name_, c.nick, c.hostmask, user)) {
+        send_privmsg(c.reply_to, "Log in first: login <password>");
+        return true;
+    }
+    if (c.args.size() != 2) {
+        send_privmsg(c.reply_to, "Usage in PM: passwd <current> <new>");
+        return true;
+    }
+    const auto result = security_mgr_.change_password_on_irc(name_, c.hostmask, user.username, c.args[0], c.args[1]);
+    send_privmsg(c.reply_to, result.second);
+    report(ReportKind::security, c.hostmask + (result.first ? " changed the password of " + user.username + "."
+                                                            : " could not change the password of " + user.username + "."));
+    return true;
 }
 
 // help, version, status, time, chanstats

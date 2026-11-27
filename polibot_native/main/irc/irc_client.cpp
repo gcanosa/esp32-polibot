@@ -1,6 +1,7 @@
 // IRCClient: the life of one network connection
 #include "irc_client.h"
 #include "irc_internal.h"
+#include "health.h"
 #include <esp_idf_version.h>
 #include <esp_chip_info.h>
 #include <esp_flash.h>
@@ -131,13 +132,18 @@ void IRCClient::apply(const IrcSettings& next) {
             send_raw("MODE " + next.report_channel); // the reply sets the new password if needed
         }
     }
-    for (const auto& ch : get_joined_channels()) sweep_akicks(ch); // the auto-kick list may have grown
+    for (const auto& ch : get_joined_channels()) {
+        sweep_akicks(ch); // the auto-kick list may have grown
+        enforce_locks(ch); // and the topic or mode locks may be new
+    }
     review_modes(); // and so may the auto-op and voice lists, or their rules
 }
 
 void IRCClient::run_loop() {
+    watch_ = watch_start(("The connection to " + name_).c_str());
     int delay = settings()->reconnect_delay;
     while (!stop_) {
+        watch_beat(watch_);
         reconnect_ = false; // changes made from here on trigger another reconnect
         wake_ = false;
         if (connect_once()) {
@@ -156,15 +162,20 @@ void IRCClient::run_loop() {
         }
         log("Disconnected. Reconnecting in " + std::to_string(delay) + "s...");
         for (int i = 0; i < delay * 10 && !stop_ && !reconnect_ && !wake_; i++) {
+            watch_beat(watch_);
             vTaskDelay(pdMS_TO_TICKS(100));
         }
         delay = wake_ ? settings()->reconnect_delay : std::min(delay * 2, settings()->max_reconnect_delay);
     }
     log("Network stopped.");
+    watch_stop(watch_);
 }
 
 void IRCClient::pause_ms(int ms) {
-    for (int i = 0; i < ms / 100 && !stop_ && !reconnect_; i++) vTaskDelay(pdMS_TO_TICKS(100));
+    for (int i = 0; i < ms / 100 && !stop_ && !reconnect_; i++) {
+        watch_beat(watch_);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
 
 std::vector<std::string> IRCClient::get_joined_channels() {

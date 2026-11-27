@@ -166,10 +166,28 @@ bool SecurityManager::login_failed(const std::string& source) {
                           settings->login_window_minutes * 60, settings->login_block_minutes * 60);
 }
 
-std::pair<bool, std::string> SecurityManager::irc_login(const std::string& network, const std::string& nick, const std::string& hostmask, const std::string& password, const std::string& username) {
-    // failures are counted per host: nicknames and idents are the sender's to choose
+// failures are counted per host: nicknames and idents are the sender's to choose
+static std::string irc_source(const std::string& network, const std::string& hostmask) {
     const size_t at = hostmask.rfind('@');
-    const std::string source = "irc " + network + " " + (at == std::string::npos ? hostmask : hostmask.substr(at + 1));
+    return "irc " + network + " " + (at == std::string::npos ? hostmask : hostmask.substr(at + 1));
+}
+
+std::pair<bool, std::string> SecurityManager::change_password_on_irc(const std::string& network, const std::string& hostmask, const std::string& username,
+                                                                     const std::string& current, const std::string& next) {
+    const std::string source = irc_source(network, hostmask);
+    if (const int wait = login_blocked_for(source)) return {false, "Too many wrong passwords. Try again in " + format_duration(wait) + "."};
+    UserAccount checked;
+    if (!authenticate(username, current, checked)) {
+        login_failed(source);
+        return {false, "The current password is wrong."};
+    }
+    auto result = set_password(username, next);
+    if (result.first) result.second = "Password changed. Log in again with the new one.";
+    return result;
+}
+
+std::pair<bool, std::string> SecurityManager::irc_login(const std::string& network, const std::string& nick, const std::string& hostmask, const std::string& password, const std::string& username) {
+    const std::string source = irc_source(network, hostmask);
     if (const int wait = login_blocked_for(source)) {
         return {false, "Too many failed logins. Try again in " + format_duration(wait) + "."};
     }
@@ -224,7 +242,7 @@ std::pair<bool, std::string> SecurityManager::irc_login(const std::string& netwo
         return {false, "Login failed: Hostmask " + hostmask + " not authorized for " + target->username};
     }
 
-    irc_sessions_[session_key(network, nick)] = {target->username, hostmask};
+    irc_sessions_[session_key(network, nick)] = {target->username, hostmask, network, nick};
     std::string msg = "Authenticated successfully as '" + target->username + "' (Global Role: " + target->global_role + ").";
     return {true, msg};
 }
@@ -342,7 +360,7 @@ bool SecurityManager::authenticate(const std::string& username, const std::strin
     return true;
 }
 
-std::string SecurityManager::create_web_session(const std::string& username) {
+std::string SecurityManager::create_web_session(const std::string& username, const std::string& address) {
     std::string token = generate_salt(32);
     const int64_t now = esp_timer_get_time();
     const int64_t idle_limit = g_settings.get()->session_minutes * 60000000LL;
@@ -355,8 +373,60 @@ std::string SecurityManager::create_web_session(const std::string& username) {
         web_sessions_.erase(std::min_element(web_sessions_.begin(), web_sessions_.end(),
                                              [](const auto& a, const auto& b) { return a.second.last_used < b.second.last_used; }));
     }
-    web_sessions_[token] = {username, now};
+    web_sessions_[token] = {username, now, ++web_session_count_, address};
     return token;
+}
+
+std::vector<SessionView> SecurityManager::sessions(const std::string& current_token) {
+    const int64_t idle_limit = g_settings.get()->session_minutes * 60000000LL;
+    const int64_t now = esp_timer_get_time();
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<SessionView> out;
+    for (const auto& s : web_sessions_) {
+        if (now - s.second.last_used > idle_limit) continue;
+        SessionView view;
+        view.id = "w" + std::to_string(s.second.id);
+        view.user = s.second.username;
+        view.from = s.second.address;
+        view.idle = (now - s.second.last_used) / 1000000;
+        view.current = s.first == current_token;
+        out.push_back(view);
+    }
+    for (const auto& s : irc_sessions_) {
+        SessionView view;
+        view.id = "i" + s.first;
+        view.user = s.second.username;
+        view.network = s.second.network;
+        view.nick = s.second.nick;
+        view.from = s.second.hostmask;
+        out.push_back(view);
+    }
+    return out;
+}
+
+std::string SecurityManager::end_session(const std::string& id, bool by_owner, std::string& username) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto refused = [&](const std::string& name) {
+        const UserAccount* u = find_user_by_name_locked(name);
+        return !by_owner && u && get_role_level(u->global_role) >= get_role_level("owner");
+    };
+    const char* gone = "That session has ended already.";
+    if (id.rfind("i", 0) == 0) {
+        auto it = irc_sessions_.find(id.substr(1));
+        if (it == irc_sessions_.end()) return gone;
+        if (refused(it->second.username)) return "Only an owner can sign an owner out.";
+        username = it->second.username;
+        irc_sessions_.erase(it);
+        return "";
+    }
+    for (auto it = web_sessions_.begin(); it != web_sessions_.end(); ++it) {
+        if (id != "w" + std::to_string(it->second.id)) continue;
+        if (refused(it->second.username)) return "Only an owner can sign an owner out.";
+        username = it->second.username;
+        web_sessions_.erase(it);
+        return "";
+    }
+    return gone;
 }
 
 bool SecurityManager::validate_web_session(const std::string& token, UserAccount& out_user, bool counts_as_activity) {

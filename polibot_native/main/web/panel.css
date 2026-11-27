@@ -114,34 +114,35 @@
   .role-user { --role: var(--dim); }
   .avatar { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-right: 10px; border-radius: 50%;
             font-weight: 700; vertical-align: middle; }
-  .users-dialog { width: min(1100px, calc(100vw - 24px)); max-height: calc(100vh - 24px); margin: auto; padding: 20px; background: var(--surface); color: var(--text);
+  .panel-dialog { width: min(1100px, calc(100vw - 24px)); max-height: calc(100vh - 24px); margin: auto; padding: 20px; background: var(--surface); color: var(--text);
                   border: 1px solid var(--border); border-top: 4px solid var(--accent); border-radius: 10px; }
-  .users-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-  .users-dialog .card-head > div:first-child { flex-basis: 0; }
-  .users-dialog .card-head > .btn { width: auto; align-self: flex-start; }
-  .users-message { color: var(--ok); font-size: 0.85rem; }
-  .users-message:not(:empty) { margin-bottom: 10px; }
-  .users-tools { margin: 0 0 14px; }
-  .users-tools > select, .chan-role > select { width: auto; }
-  .users-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 0.88rem; }
-  .users-table th { background: var(--surface-2); padding: 10px; text-align: left; font-size: 0.8rem; }
-  .users-table th button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
-  .users-table th button::after { content: " ↕"; color: var(--dim); }
-  .users-table th[aria-sort="ascending"] button::after { content: " ▲"; }
-  .users-table th[aria-sort="descending"] button::after { content: " ▼"; }
-  .users-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-  .users-table tbody tr:hover { background: var(--accent-soft); }
-  .users-actions { white-space: nowrap; }
-  .users-actions .btn { width: 38px; padding: 0; }
-  /* on a phone every account is a block of its own */
+  .panel-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+  .panel-dialog .card-head > div:first-child { flex-basis: 0; }
+  .panel-dialog .card-head > .btn { width: auto; align-self: flex-start; }
+  .panel-message { color: var(--ok); font-size: 0.85rem; }
+  .panel-message:not(:empty) { margin-bottom: 10px; }
+  .panel-tools { margin: 0 0 14px; }
+  .panel-tools > select, .chan-role > select { width: auto; }
+  .data-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 0.88rem; }
+  .data-table th { background: var(--surface-2); padding: 10px; text-align: left; font-size: 0.8rem; }
+  .data-table th button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+  .data-table th button::after { content: " ↕"; color: var(--dim); }
+  .data-table th[aria-sort="ascending"] button::after { content: " ▲"; }
+  .data-table th[aria-sort="descending"] button::after { content: " ▼"; }
+  .data-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  .data-table tbody tr:hover { background: var(--accent-soft); }
+  .row-actions { white-space: nowrap; }
+  .row-actions .btn { margin: 1px 0; }
+  .row-actions .btn:empty { width: 38px; padding: 0; }
+  /* on a phone every row is a block of its own */
   @media (max-width: 720px) {
-    .users-table, .users-table tbody, .users-table tr, .users-table td { display: block; }
-    .users-table thead { display: none; }
-    .users-table tr { border: 1px solid var(--border); border-radius: 8px; padding: 6px; margin-bottom: 8px; }
-    .users-table td { border: 0; padding: 4px; }
-    .users-table td[data-label]::before { content: attr(data-label) ": "; color: var(--dim); font-size: 0.8rem; }
-    .users-table .users-actions { display: flex; gap: 8px; }
-    .users-actions .btn { flex: 1; }
+    .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; }
+    .data-table thead { display: none; }
+    .data-table tr { border: 1px solid var(--border); border-radius: 8px; padding: 6px; margin-bottom: 8px; }
+    .data-table td { border: 0; padding: 4px; }
+    .data-table td[data-label]::before { content: attr(data-label) ": "; color: var(--dim); font-size: 0.8rem; }
+    .data-table .row-actions { display: flex; flex-wrap: wrap; gap: 8px; white-space: normal; }
+    .row-actions .btn { flex: 1; }
     /* channel on its own line, its role and the bin under it */
     .console-input-row.chan-role > input { flex-basis: 100%; }
     .console-input-row.chan-role > select { flex: 1 1 0; width: auto; }

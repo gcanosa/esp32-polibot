@@ -9,13 +9,15 @@
 constexpr int MAX_CONFIG_BODY = 96 * 1024; // a full configuration or backup
 
 // The panel's server. Its source files, by subject: web_server (routes, pages, shared helpers),
-// api_session, api_status, api_users, api_config, api_action, api_access, api_backup, api_ota, api_update.
+// api_session, api_status, api_users, api_config, api_action, api_access, api_channel, api_sessions,
+// api_backup, api_ota, api_update.
 class WebServer {
 public:
     WebServer(ConfigManager& config_mgr, SecurityManager& security_mgr, IRCManager& irc_mgr);
     ~WebServer();
 
     bool start(int port = 80);
+    void check_alive(); // from the main loop: a server that stops responding restarts the device
     void stop();
     bool in_use() const;  // a signed-in panel made a request in the last 10 seconds
     bool visited() const; // the status page was on somebody's screen in the last 10 seconds
@@ -33,11 +35,19 @@ private:
     static esp_err_t send_json(httpd_req_t* req, cJSON* json, int status_code = 200);
     static std::string read_post_body(httpd_req_t* req, int limit = 32768);
     static std::string get_token(httpd_req_t* req);
+    // The visitor's address: the connection's, or the one a trusted proxy names
+    static std::string client_address(httpd_req_t* req);
+    // The connection's address, if it forwards for somebody and is not trusted; else ""
+    static std::string untrusted_proxy(httpd_req_t* req);
     static bool require_owner(httpd_req_t* req);
     static esp_err_t send_message(httpd_req_t* req, int status_code, const std::string& message);
     // "access_add" and "access_del" of /api/action, once the caller's right to them is checked
     static esp_err_t access_action(httpd_req_t* req, const cJSON* body, IRCClient& client, const std::string& channel,
                                    const std::string& user, bool adding);
+    // "channel_view" and "ban_lift" of /api/action
+    static esp_err_t channel_view(httpd_req_t* req, IRCClient& client, const std::string& channel);
+    static esp_err_t ban_lift(httpd_req_t* req, const cJSON* body, IRCClient& client, const std::string& channel,
+                              const std::string& user, bool admin);
 
     // Handlers
     static esp_err_t api_system_handler(httpd_req_t* req);
@@ -62,6 +72,8 @@ private:
     static esp_err_t api_update_post_handler(httpd_req_t* req);
     static esp_err_t api_backup_handler(httpd_req_t* req);
     static esp_err_t api_restore_handler(httpd_req_t* req);
+    static esp_err_t api_sessions_get_handler(httpd_req_t* req);
+    static esp_err_t api_sessions_post_handler(httpd_req_t* req);
 };
 
 extern WebServer g_web_server;

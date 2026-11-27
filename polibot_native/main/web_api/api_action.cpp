@@ -1,5 +1,7 @@
 // Buttons of the panel: device actions, channel actions and the IRC console
 #include "web_server.h"
+#include "alerts.h"
+#include "mode_lock.h"
 #include <algorithm>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
@@ -22,6 +24,15 @@ esp_err_t WebServer::api_action_handler(httpd_req_t* req) {
     std::string action = (act_i && act_i->valuestring) ? act_i->valuestring : "";
 
     int user_level = has_auth ? get_role_level(user.global_role) : 0;
+
+    if (action == "test_alert") {
+        cJSON_Delete(p);
+        if (user_level < get_role_level("admin")) return send_message(req, 403, "Administrator permission required.");
+        const std::string& url = g_settings.get()->alert_url;
+        if (url.empty()) return send_message(req, 400, "Save an alert address first.");
+        alert("Test alert, asked for by " + user.username + ".");
+        return send_message(req, 200, "Test alert queued: the event log says whether it arrived.");
+    }
 
     if (action == "rehash" || action == "reconnect" || action == "reboot" || action == "clear_logs") {
         if (user_level < get_role_level("admin")) {
@@ -51,7 +62,8 @@ esp_err_t WebServer::api_action_handler(httpd_req_t* req) {
     }
 
     const bool lists = action == "access_add" || action == "access_del";
-    if (lists || action == "chan_lockdown" || action == "chan_unlock" || action == "chan_limit_update" || action == "save_chan_config") {
+    if (lists || action == "chan_lockdown" || action == "chan_unlock" || action == "chan_limit_update" || action == "save_chan_config" ||
+        action == "channel_view" || action == "ban_lift") {
         cJSON* ch_i = cJSON_GetObjectItemCaseSensitive(p, "channel");
         std::string ch = (ch_i && ch_i->valuestring) ? ch_i->valuestring : "";
 
@@ -75,6 +87,12 @@ esp_err_t WebServer::api_action_handler(httpd_req_t* req) {
                 return send_message(req, 403, "Administrator permission required.");
             }
             const esp_err_t result = access_action(req, p, *client, ch, user.username, action == "access_add");
+            cJSON_Delete(p);
+            return result;
+        }
+
+        if (action == "channel_view" || action == "ban_lift") {
+            const esp_err_t result = action == "ban_lift" ? ban_lift(req, p, *client, ch, user.username, admin) : channel_view(req, *client, ch);
             cJSON_Delete(p);
             return result;
         }
@@ -131,9 +149,27 @@ esp_err_t WebServer::api_action_handler(httpd_req_t* req) {
                 cJSON* op = cJSON_GetObjectItemCaseSensitive(c_obj, "auto_op"); // null: as the general setting says
                 if (admin && op) cfg.auto_op = cJSON_IsBool(op) ? cJSON_IsTrue(op) : -1;
 
+                cJSON* topic = cJSON_GetObjectItemCaseSensitive(c_obj, "topic_lock");
+                if (admin && topic) {
+                    cJSON* en = cJSON_GetObjectItemCaseSensitive(topic, "enabled");
+                    cJSON* text = cJSON_GetObjectItemCaseSensitive(topic, "topic");
+                    if (en) cfg.topic_lock = cJSON_IsTrue(en);
+                    if (cJSON_IsString(text)) cfg.topic = text->valuestring;
+                    cfg.topic.erase(std::remove_if(cfg.topic.begin(), cfg.topic.end(), [](char c) { return c == '\r' || c == '\n'; }), cfg.topic.end());
+                }
+                cJSON* modes = cJSON_GetObjectItemCaseSensitive(c_obj, "mode_lock");
+                if (admin && cJSON_IsString(modes)) {
+                    cfg.mode_lock = clean_mode_lock(modes->valuestring);
+                    if (cfg.mode_lock.empty() && modes->valuestring[0]) {
+                        cJSON_Delete(p);
+                        return send_message(req, 400, "Only plain channel modes can be locked, such as +nt-s (no ranks, lists, keys or limits).");
+                    }
+                }
+
                 g_guardian.save_channel_config(net, ch, cfg);
                 client->check_and_update_dynamic_limit(ch);
                 client->review_modes(ch);
+                client->enforce_locks(ch);
             }
         }
         cJSON_Delete(p);
@@ -157,8 +193,14 @@ esp_err_t WebServer::api_action_handler(httpd_req_t* req) {
             return send_message(req, 400, "No such IRC network.");
         }
 
+        std::string replies; // what the bot answers, which goes to the event log
         if (cmd.rfind("!", 0) == 0) {
+            const uint32_t before = g_log_buffer.latest();
             client->handle_command("", uname, WEB_CONSOLE_HOSTMASK, cmd.substr(1), true);
+            const std::string mark = "[" + client->name() + "] Reply: ";
+            for (const auto& line : g_log_buffer.get_lines(before)) {
+                if (line.message.rfind(mark, 0) == 0) replies += (replies.empty() ? "" : "\n") + line.message.substr(mark.size());
+            }
         } else {
             if (user_level < get_role_level("admin")) {
                 cJSON_Delete(p);
@@ -170,9 +212,7 @@ esp_err_t WebServer::api_action_handler(httpd_req_t* req) {
         }
         g_log_buffer.log("Web Console (" + uname + " on " + client->name() + "): " + redact_command(cmd));
         cJSON_Delete(p);
-        cJSON* res = cJSON_CreateObject();
-        cJSON_AddStringToObject(res, "status", "ok");
-        return send_json(req, res, 200);
+        return send_message(req, 200, replies);
     }
 
     cJSON_Delete(p);

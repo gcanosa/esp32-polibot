@@ -2,7 +2,13 @@
 // c++ -std=c++17 -I main/logic test/logic_test.cpp main/logic/*.cpp -o /tmp/logic_test && /tmp/logic_test
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include "access_list.h"
+#include "crash_log.h"
+#include "mdns_reply.h"
+#include "mode_lock.h"
+#include "proxy.h"
+#include "spam.h"
 #include "releases.h"
 #include "account_book.h"
 #include "auto_modes.h"
@@ -46,6 +52,7 @@ static void text() {
     assert(redact_command("PRIVMSG #c :hello") == "PRIVMSG #c :hello");
     assert(redact_command("!join #secret hunter2") == "!join #secret <hidden>" && redact_command("JOIN #secret hunter2") == "JOIN #secret <hidden>");
     assert(redact_command("!join #open") == "!join #open" && redact_command("please join us now") == "please join us now");
+    assert(redact_command("!passwd old-one new-one") == "!passwd <hidden>");
     assert(tag_value("time=2026;account=alice;msgid=1", "account") == "alice" && tag_value("account=bob", "account") == "bob");
     assert(tag_value("draft/account=x;accounts=y", "account") == "" && tag_value("account;x=1", "account") == "" && tag_value("", "account") == "");
     assert((parse_steps("warn, Quiet,nonsense,ban") == std::vector<std::string>{"warn", "quiet", "ban"}));
@@ -282,7 +289,115 @@ static void releases() {
     assert(!sha256_text(std::string(63, 'a')) && !sha256_text(std::string(65, 'a')) && !sha256_text(std::string(64, 'g')) && !sha256_text(std::string(64, 'A')));
 }
 
+static void spam() {
+    auto advert = [](const char* line, bool channels = true, const char* allowed = "") { return find_advert(line, "#here", channels, allowed); };
+    assert(advert("look at HTTP://Bad.Example/x now") == "bad.example" && advert("(https://a.example)") == "a.example");
+    assert(advert("www.bad.example") == "www.bad.example" && advert("join discord.gg/abc123") == "discord.gg");
+    assert(advert("\x03" "04,01ht\x02tp://hidden.example") == "hidden.example" && advert("http://user:pw@host.example:81/") == "host.example");
+    assert(advert("come to #spam!") == "#spam" && advert("##elsewhere") == "##elsewhere");
+    for (const char* fine : {"and/or", "3.5/10 stars", "e.g./i.e./x", "mail me@host.example", "me@host.example/x", "C# rocks",
+                             "we are #1", "#HERE is nice", "file.txt and example.org", "ssh://host", "http://", "#", ""}) {
+        assert(advert(fine).empty());
+    }
+    assert(advert("#other", false).empty() && advert("www.bad.example", false) == "www.bad.example");
+    assert(advert("https://docs.good.example/a", true, "good.example, other.example").empty());
+    assert(advert("https://evilgood.example", true, "good.example") == "evilgood.example");
+    const auto names = name_words("@alice: Bob, carol... alice [dave]|x?");
+    assert((names == std::vector<std::string>{"alice", "bob", "carol", "[dave]|x"}));
+}
+
+static void mode_locks() {
+    assert(clean_mode_lock("+nt-s") == "+nt-s" && clean_mode_lock("nt") == "+nt" && clean_mode_lock("-s+t-t") == "-st");
+    for (const char* bad : {"", "+k", "+l", "+o", "+b", "+m something", "+n!", "+"}) assert(clean_mode_lock(bad).empty());
+    const ServerSupport support;
+    assert(broken_modes("+nt-s", parse_modes(support, {"-t+s+i"}), "") == "+t-s");
+    assert(broken_modes("+nt-s", parse_modes(support, {"+t-s"}), "").empty());
+    assert(broken_modes("+t", parse_modes(support, {"-t+t"}), "").empty()); // the last word counts
+    assert(broken_modes("-mi", parse_modes(support, {"+mi"}), "mi").empty()); // locked down
+    assert(missing_modes("+nt-s", "ns", "") == "+t-s" && missing_modes("+nt-s", "nt", "").empty() && missing_modes("-m", "m", "m").empty());
+}
+
+static void crash_log() {
+    static SavedLog log;
+    std::memset(&log, 0xa5, sizeof(log)); // what memory holds after a power cut
+    assert(!saved_log_line(log, 0));
+    saved_log_add(log, 7, "first");
+    saved_log_add(log, 8, "second");
+    std::vector<std::string> read;
+    auto collect = [&] {
+        read.clear();
+        for (size_t i = 0; i < SavedLog::LINES; i++) {
+            if (const SavedLine* line = saved_log_line(log, i)) read.push_back(line->text);
+        }
+    };
+    collect();
+    assert((read == std::vector<std::string>{"first", "second"}));
+    for (size_t i = 0; i < SavedLog::LINES; i++) saved_log_add(log, i, std::to_string(i).c_str());
+    collect();
+    assert(read.size() == SavedLog::LINES && read.front() == "0" && read.back() == std::to_string(SavedLog::LINES - 1));
+    saved_log_add(log, 1, (std::string(146, 'x') + "\xc3\xa9").c_str()); // cut before the two-byte letter
+    collect();
+    assert(read.back() == std::string(146, 'x'));
+    log.lines[(log.next + 1) % SavedLog::LINES].text[0] ^= 1; // damaged: left out
+    collect();
+    assert(read.size() == SavedLog::LINES - 1);
+    log.next = 4000;
+    collect();
+    assert(read.empty());
+}
+
+static void mdns() {
+    const uint8_t ip[4] = {192, 168, 1, 5};
+    uint8_t out[160];
+    auto query = [](const std::string& host, uint16_t type = 1, uint16_t klass = 1, uint16_t flags = 0) {
+        std::vector<uint8_t> q = {0x12, 0x34, uint8_t(flags >> 8), uint8_t(flags), 0, 1, 0, 0, 0, 0, 0, 0};
+        q.push_back(host.size());
+        q.insert(q.end(), host.begin(), host.end());
+        for (char b : std::string("\x05local\0", 7)) q.push_back(b);
+        for (uint16_t v : {type, klass}) q.push_back(v >> 8), q.push_back(v & 0xff);
+        return q;
+    };
+    auto ask = [&](const std::vector<uint8_t>& q, bool legacy = false, size_t room = sizeof(out)) {
+        return mdns_reply(q.data(), q.size(), "polibot", ip, legacy, out, room);
+    };
+    MdnsReply r = ask(query("PoliBot"));
+    assert(r.length == 12 + 15 + 14 && !r.unicast && out[0] == 0 && out[2] == 0x84 && out[5] == 0 && out[7] == 1);
+    assert(std::memcmp(out + r.length - 4, ip, 4) == 0 && out[12] == 7 && out[29] == 0x80);
+    assert(ask(query("polibot", 255, 0x8001)).unicast);
+    r = ask(query("polibot"), true);
+    assert(r.length == 12 + 19 + 15 + 14 && r.unicast && out[0] == 0x12 && out[1] == 0x34 && out[5] == 1);
+    assert(!ask(query("other")).length && !ask(query("polibo")).length && !ask(query("polibot", 28)).length);
+    assert(!ask(query("polibot", 1, 1, 0x8400)).length && !ask(query("polibot"), false, 20).length);
+    auto cut = query("polibot");
+    for (size_t n = 0; n < cut.size(); n++) assert(!mdns_reply(cut.data(), n, "polibot", ip, false, out, sizeof(out)).length);
+    // a second question whose name points back at the first one's "local"
+    auto two = query("other");
+    two[5] = 2;
+    for (char b : std::string("\x07polibot\xc0\x12\0\x01\0\x01", 14)) two.push_back(b);
+    assert(ask(two).length);
+    const std::vector<uint8_t> loop = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xc0, 12, 0, 1, 0, 1}; // points at itself
+    assert(!ask(loop).length);
+    assert(valid_host_name("poli-bot2") && !valid_host_name("") && !valid_host_name("a.local") && !valid_host_name("-a") && !valid_host_name(std::string(33, 'a')));
+}
+
+static void proxies() {
+    assert(valid_proxy_list("") && valid_proxy_list("10.0.0.1") && valid_proxy_list(" 10.0.0.1, 192.168.255.0 "));
+    for (const char* bad : {"host.example", "10.0.0", "10.0.0.1.2", "256.0.0.1", "10..0.1", "0001.0.0.1", "::1", "10.0.0.1/24", "10.0.0.1;"}) {
+        assert(!valid_proxy_list(bad));
+    }
+    assert(!valid_proxy_list("1.1.1.1 1.1.1.1 1.1.1.1 1.1.1.1 1.1.1.1 1.1.1.1 1.1.1.1 1.1.1.1 1.1.1.1"));
+    assert(proxy_listed("10.0.0.1, 10.0.0.2", "10.0.0.2") && !proxy_listed("10.0.0.11", "10.0.0.1") && !proxy_listed("", "10.0.0.1") && !proxy_listed("10.0.0.1", ""));
+    assert(forwarded_address("203.0.113.7") == "203.0.113.7" && forwarded_address("6.6.6.6, 203.0.113.7 ") == "203.0.113.7");
+    assert(forwarded_address("2001:db8::1") == "2001:db8::1" && forwarded_address("::ffff:203.0.113.7") == "::ffff:203.0.113.7");
+    for (const char* bad : {"", " ", "203.0.113.7,", "unknown", "203.0.113.7, <b>", "a:b", "1.2.3.4\r\nx"}) assert(forwarded_address(bad).empty());
+}
+
 int main() {
+    proxies();
+    spam();
+    mode_locks();
+    crash_log();
+    mdns();
     releases();
     channel_limit();
     access_lists();

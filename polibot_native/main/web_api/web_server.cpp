@@ -1,32 +1,41 @@
 // The web server itself: routes, the embedded pages and what every API handler shares
 #include "web_server.h"
+#include "health.h"
+#include "proxy.h"
+#include <lwip/sockets.h>
+#include <esp_app_desc.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <atomic>
+#include <cerrno>
 #include <cstring>
 #include <iterator>
 
 static const char* TAG = "WEB";
 
-// Files compiled into the firmware (main/web), sent straight from flash
+// Files compiled into the firmware (main/web), sent straight from flash. The text ones are packed
+// with gzip while building (main/CMakeLists.txt) and sent that way.
 #define EMBEDDED(symbol)                                                    \
     extern const char symbol##_start[] asm("_binary_" #symbol "_start"); \
     extern const char symbol##_end[] asm("_binary_" #symbol "_end")
-EMBEDDED(index_html);
-EMBEDDED(home_html);
+EMBEDDED(index_html_gz);
+EMBEDDED(home_html_gz);
 EMBEDDED(logo_webp);
 EMBEDDED(board_webp);
-EMBEDDED(theme_js);
-EMBEDDED(ui_css);
-EMBEDDED(panel_css);
-EMBEDDED(panel_core_js);
-EMBEDDED(panel_irc_js);
-EMBEDDED(panel_rules_js);
-EMBEDDED(panel_users_js);
-EMBEDDED(panel_system_js);
-EMBEDDED(panel_logs_js);
-EMBEDDED(panel_wifi_js);
-EMBEDDED(panel_access_js);
-EMBEDDED(panel_update_js);
+EMBEDDED(theme_js_gz);
+EMBEDDED(ui_css_gz);
+EMBEDDED(panel_css_gz);
+EMBEDDED(panel_core_js_gz);
+EMBEDDED(panel_irc_js_gz);
+EMBEDDED(panel_rules_js_gz);
+EMBEDDED(panel_users_js_gz);
+EMBEDDED(panel_system_js_gz);
+EMBEDDED(panel_logs_js_gz);
+EMBEDDED(panel_wifi_js_gz);
+EMBEDDED(panel_access_js_gz);
+EMBEDDED(panel_update_js_gz);
+EMBEDDED(panel_channel_js_gz);
+EMBEDDED(panel_sessions_js_gz);
 
 namespace {
 
@@ -35,28 +44,33 @@ struct Asset {
     const char* type;
     const char* start;
     const char* end;
-    bool text; // embedded text files end in a zero byte that is not part of them
+    bool text; // gzipped, and tied to this firmware; pictures are neither
 };
+
+char s_version_tag[24]; // names this firmware, so a browser asks again only after an update
 
 const char* HTML = "text/html; charset=utf-8";
 const char* JS = "text/javascript; charset=utf-8";
+const char* CSS = "text/css; charset=utf-8";
 
 const Asset ASSETS[] = {
-    {"/", HTML, home_html_start, home_html_end, true},
-    {"/index.html", HTML, home_html_start, home_html_end, true},
-    {"/panel", HTML, index_html_start, index_html_end, true},
-    {"/ui.css", "text/css; charset=utf-8", ui_css_start, ui_css_end, true},
-    {"/panel.css", "text/css; charset=utf-8", panel_css_start, panel_css_end, true},
-    {"/panel_core.js", JS, panel_core_js_start, panel_core_js_end, true},
-    {"/panel_irc.js", JS, panel_irc_js_start, panel_irc_js_end, true},
-    {"/panel_rules.js", JS, panel_rules_js_start, panel_rules_js_end, true},
-    {"/panel_users.js", JS, panel_users_js_start, panel_users_js_end, true},
-    {"/panel_system.js", JS, panel_system_js_start, panel_system_js_end, true},
-    {"/panel_logs.js", JS, panel_logs_js_start, panel_logs_js_end, true},
-    {"/panel_wifi.js", JS, panel_wifi_js_start, panel_wifi_js_end, true},
-    {"/panel_access.js", JS, panel_access_js_start, panel_access_js_end, true},
-    {"/panel_update.js", JS, panel_update_js_start, panel_update_js_end, true},
-    {"/theme.js", JS, theme_js_start, theme_js_end, true},
+    {"/", HTML, home_html_gz_start, home_html_gz_end, true},
+    {"/index.html", HTML, home_html_gz_start, home_html_gz_end, true},
+    {"/panel", HTML, index_html_gz_start, index_html_gz_end, true},
+    {"/ui.css", CSS, ui_css_gz_start, ui_css_gz_end, true},
+    {"/panel.css", CSS, panel_css_gz_start, panel_css_gz_end, true},
+    {"/panel_core.js", JS, panel_core_js_gz_start, panel_core_js_gz_end, true},
+    {"/panel_irc.js", JS, panel_irc_js_gz_start, panel_irc_js_gz_end, true},
+    {"/panel_rules.js", JS, panel_rules_js_gz_start, panel_rules_js_gz_end, true},
+    {"/panel_users.js", JS, panel_users_js_gz_start, panel_users_js_gz_end, true},
+    {"/panel_system.js", JS, panel_system_js_gz_start, panel_system_js_gz_end, true},
+    {"/panel_logs.js", JS, panel_logs_js_gz_start, panel_logs_js_gz_end, true},
+    {"/panel_wifi.js", JS, panel_wifi_js_gz_start, panel_wifi_js_gz_end, true},
+    {"/panel_access.js", JS, panel_access_js_gz_start, panel_access_js_gz_end, true},
+    {"/panel_update.js", JS, panel_update_js_gz_start, panel_update_js_gz_end, true},
+    {"/panel_channel.js", JS, panel_channel_js_gz_start, panel_channel_js_gz_end, true},
+    {"/panel_sessions.js", JS, panel_sessions_js_gz_start, panel_sessions_js_gz_end, true},
+    {"/theme.js", JS, theme_js_gz_start, theme_js_gz_end, true},
     {"/logo.webp", "image/webp", logo_webp_start, logo_webp_end, false},
     {"/board.webp", "image/webp", board_webp_start, board_webp_end, false},
 };
@@ -66,8 +80,37 @@ esp_err_t asset_handler(httpd_req_t* req) {
     httpd_resp_set_type(req, asset.type);
     // pages and scripts must match the firmware that serves them; the logo hardly changes
     httpd_resp_set_hdr(req, "Cache-Control", asset.text ? "no-cache" : "public, max-age=86400");
-    return httpd_resp_send(req, asset.start, asset.end - asset.start - (asset.text ? 1 : 0));
+    httpd_resp_set_hdr(req, "ETag", s_version_tag);
+    char known[64];
+    if (httpd_req_get_hdr_value_str(req, "If-None-Match", known, sizeof(known)) == ESP_OK && strstr(known, s_version_tag)) {
+        httpd_resp_set_status(req, "304 Not Modified"); // the browser's copy is this one
+        return httpd_resp_send(req, nullptr, 0);
+    }
+    if (asset.text) httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    return httpd_resp_send(req, asset.start, asset.end - asset.start);
 }
+
+std::atomic<int> s_watch{-1}; // the web server's place in the hang check
+
+// Bytes moving on a connection show that the server works, however long a request takes: an upload, a
+// slow browser, or headers sent a byte at a time (which must not be a way to restart the device).
+// Errors are reported as the server's own functions would.
+int moved(int n) {
+    if (n < 0) return errno == EAGAIN || errno == EINTR ? HTTPD_SOCK_ERR_TIMEOUT : HTTPD_SOCK_ERR_FAIL;
+    watch_beat(s_watch);
+    return n;
+}
+
+int watched_recv(httpd_handle_t, int fd, char* buf, size_t length, int flags) { return moved(recv(fd, buf, length, flags)); }
+int watched_send(httpd_handle_t, int fd, const char* buf, size_t length, int flags) { return moved(send(fd, buf, length, flags)); }
+
+esp_err_t watch_connection(httpd_handle_t server, int fd) {
+    httpd_sess_set_recv_override(server, fd, watched_recv);
+    httpd_sess_set_send_override(server, fd, watched_send);
+    return ESP_OK;
+}
+
+void still_serving(void*) { watch_beat(s_watch); }
 
 } // namespace
 
@@ -130,6 +173,42 @@ std::string WebServer::get_token(httpd_req_t* req) {
     return "";
 }
 
+// The address at the other end of the connection
+static std::string peer_address(httpd_req_t* req) {
+    sockaddr_in6 peer = {};
+    socklen_t length = sizeof(peer);
+    char text[INET6_ADDRSTRLEN] = "unknown";
+    if (getpeername(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&peer), &length) == 0) {
+        if (peer.sin6_family == AF_INET6) inet_ntop(AF_INET6, &peer.sin6_addr, text, sizeof(text));
+        else inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(&peer)->sin_addr, text, sizeof(text));
+    }
+    const std::string address = text;
+    return address.rfind("::FFFF:", 0) == 0 || address.rfind("::ffff:", 0) == 0 ? address.substr(7) : address;
+}
+
+static std::string forwarded_for(httpd_req_t* req) {
+    // read whole (the server limits the headers): the address that counts is at the end
+    const size_t length = httpd_req_get_hdr_value_len(req, "X-Forwarded-For");
+    if (!length) return "";
+    std::string header(length + 1, '\0');
+    if (httpd_req_get_hdr_value_str(req, "X-Forwarded-For", &header[0], header.size()) != ESP_OK) return "";
+    header.resize(length);
+    return forwarded_address(header);
+}
+
+std::string WebServer::client_address(httpd_req_t* req) {
+    const std::string peer = peer_address(req);
+    if (!proxy_listed(g_settings.get()->trusted_proxies, peer)) return peer;
+    const std::string visitor = forwarded_for(req);
+    return visitor.empty() ? peer : visitor;
+}
+
+std::string WebServer::untrusted_proxy(httpd_req_t* req) {
+    const std::string peer = peer_address(req);
+    if (forwarded_for(req).empty() || !valid_proxy_list(peer) || proxy_listed(g_settings.get()->trusted_proxies, peer)) return "";
+    return peer;
+}
+
 bool WebServer::get_authenticated_user(httpd_req_t* req, UserAccount& out_user, bool even_with_default_password) {
     const std::string token = get_token(req);
     // the panel marks its own periodic refreshing, which must not keep an unattended session alive
@@ -179,7 +258,13 @@ bool WebServer::start(int port) {
         {.uri = "/api/ota/url", .method = HTTP_POST, .handler = api_ota_url_handler, .user_ctx = nullptr},
         {.uri = "/api/update", .method = HTTP_GET, .handler = api_update_get_handler, .user_ctx = nullptr},
         {.uri = "/api/update", .method = HTTP_POST, .handler = api_update_post_handler, .user_ctx = nullptr},
+        {.uri = "/api/sessions", .method = HTTP_GET, .handler = api_sessions_get_handler, .user_ctx = nullptr},
+        {.uri = "/api/sessions", .method = HTTP_POST, .handler = api_sessions_post_handler, .user_ctx = nullptr},
     };
+
+    char hash[17];
+    esp_app_get_elf_sha256(hash, sizeof(hash));
+    snprintf(s_version_tag, sizeof(s_version_tag), "\"%s\"", hash);
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port;
@@ -187,6 +272,7 @@ bool WebServer::start(int port) {
     config.max_resp_headers = 8;
     config.stack_size = 12288; // console commands run on this task
     config.lru_purge_enable = true; // idle browser keep-alive connections must not lock others out
+    config.open_fn = watch_connection;
 
     if (httpd_start(&server_, &config) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start HTTP server.");
@@ -203,8 +289,15 @@ bool WebServer::start(int port) {
     return true;
 }
 
+void WebServer::check_alive() {
+    if (!server_) return;
+    if (s_watch < 0) s_watch = watch_start("The web panel");
+    httpd_queue_work(server_, still_serving, nullptr); // run by the server once it is free
+}
+
 void WebServer::stop() {
     if (server_) {
+        watch_stop(s_watch.exchange(-1));
         httpd_stop(server_);
         server_ = nullptr;
     }

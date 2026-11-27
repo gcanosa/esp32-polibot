@@ -9,6 +9,8 @@
 #include "wifi_scan.h"
 #include "update_checker.h"
 #include <esp_app_desc.h>
+#include <esp_random.h>
+#include <cstdlib>
 
 esp_err_t WebServer::api_system_handler(httpd_req_t* req) {
     // the status page says so while somebody has it on screen; the status LED shows it
@@ -136,17 +138,29 @@ esp_err_t WebServer::api_status_handler(httpd_req_t* req) {
     return send_json(req, res, 200);
 }
 
-// 6. GET /api/logs
+// 6. GET /api/logs gives every line held. With ?since=<number> only the newer ones, as
+// {"boot", "oldest", "lines"}: the numbers start again when "boot" changes.
 esp_err_t WebServer::api_logs_handler(httpd_req_t* req) {
     UserAccount user;
     if (!g_web_server.get_authenticated_user(req, user)) return send_message(req, 401, "Login required.");
-    auto lines = g_log_buffer.get_lines();
+    char query[32], value[12];
+    const bool newer = httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+                       httpd_query_key_value(query, "since", value, sizeof(value)) == ESP_OK;
+    uint32_t oldest = 0;
+    auto lines = g_log_buffer.get_lines(newer ? strtoul(value, nullptr, 10) : 0, &oldest);
     cJSON* arr = cJSON_CreateArray();
     for (const auto& l : lines) {
         cJSON* item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "id", l.id);
         cJSON_AddNumberToObject(item, "time", l.timestamp);
         cJSON_AddStringToObject(item, "msg", l.message.c_str());
         cJSON_AddItemToArray(arr, item);
     }
-    return send_json(req, arr, 200);
+    if (!newer) return send_json(req, arr, 200);
+    static const uint32_t boot = esp_random() | 1;
+    cJSON* res = cJSON_CreateObject();
+    cJSON_AddNumberToObject(res, "boot", boot);
+    cJSON_AddNumberToObject(res, "oldest", oldest);
+    cJSON_AddItemToObject(res, "lines", arr);
+    return send_json(req, res, 200);
 }

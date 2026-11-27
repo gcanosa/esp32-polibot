@@ -54,6 +54,15 @@ struct ChannelGuardianConfig {
     bool auto_lockdown = false; // set by raid protection, so it ends by itself
     TimedVoiceConfig timed_voice;
     int auto_op = -1; // opping admins in this channel: -1 as the general setting says, 0 no, 1 yes
+    bool topic_lock = false; // the topic below is put back when somebody else changes it
+    std::string topic;
+    std::string mode_lock; // modes kept set or unset, like "+nt-s"; "" = none
+};
+
+// What the connection knows about a line and its sender
+struct LineContext {
+    bool voiced = false;
+    int named = 0; // how many of those present it names
 };
 
 // What the bot gives out by itself in one channel
@@ -102,9 +111,14 @@ public:
     // Removes the entries of this network and channel ("" = the all-channel ones) with this mask
     bool remove_akick(const std::string& network, const std::string& channel, const std::string& mask);
 
-    std::vector<GuardianAction> inspect_message(const std::string& network, const std::string& channel, const std::string& nick, const std::string& hostmask, const std::string& message);
+    std::vector<GuardianAction> inspect_message(const std::string& network, const std::string& channel, const std::string& nick, const std::string& hostmask,
+                                                const std::string& message, const LineContext& line);
     // count_for_raid is false for users coming back from a netsplit
     std::vector<GuardianAction> on_user_join(const std::string& network, const std::string& channel, const std::string& nick, const std::string& hostmask, bool count_for_raid);
+    // Floods by one user. A nickname change is judged in every channel given; a join, part or quit in
+    // one channel, where something is only done on a join, while they are there to be removed.
+    std::vector<GuardianAction> on_nick_change(const std::string& network, const std::vector<std::string>& channels, const std::string& nick, const std::string& hostmask);
+    std::vector<GuardianAction> on_presence(const std::string& network, const std::string& channel, const std::string& nick, const std::string& hostmask, bool joined);
 
 private:
     ConfigManager& config_mgr_;
@@ -141,6 +155,7 @@ private:
     RateWindow messages_{256};
     RateWindow joins_{128};
     CloneDetector clones_;
+    RateWindow churn_{256}; // nickname changes, joins and parts
     Strikes strikes_;
 
     // The stored rules that apply, or null for the defaults

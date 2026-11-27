@@ -61,10 +61,14 @@ function openUsers() {
   loadUsers();
 }
 
+// The dialog shows one of its views at a time
+function showUsersView(id) {
+  ['users-list', 'users-form', 'users-sessions'].forEach(view => document.getElementById(view).hidden = view !== id);
+}
+
 // The toast would be hidden behind the dialog, so results are shown inside it
 function showUserList(message = '') {
-  document.getElementById('users-form').hidden = true;
-  document.getElementById('users-list').hidden = false;
+  showUsersView('users-list');
   document.getElementById('users-message').innerText = message;
 }
 
@@ -110,7 +114,7 @@ function renderUsers() {
       <td data-label="Role">${roleBadge(u.global_role)}</td>
       <td data-label="Channel roles">${channels || '—'}</td>
       <td data-label="Recognised by">${recognisedBy(u)}</td>
-      <td class="users-actions">
+      <td class="row-actions">
         <button class="btn btn-sm" data-icon="edit" data-act="edit" data-user="${name}" aria-label="Edit ${name}"
           title="${owner && !iAmOwner ? 'Only an owner can change an owner' : 'Edit'}"${owner && !iAmOwner ? ' disabled' : ''}></button>
         <button class="btn btn-red btn-sm" data-icon="trash" data-act="delete" data-user="${name}" aria-label="Delete ${name}"
@@ -140,8 +144,7 @@ function addChannelRole(channel = '', role = 'mod') {
 function openUserForm(user) {
   editingUser = user?.username ?? null;
   const field = id => document.getElementById(id);
-  field('users-list').hidden = true;
-  field('users-form').hidden = false;
+  showUsersView('users-form');
   field('users-message').innerText = '';
   field('users-form-title').innerText = user ? `Edit ${user.username}` : 'Add User';
   field('usr-name').value = editingUser || '';

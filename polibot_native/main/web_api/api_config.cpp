@@ -22,6 +22,8 @@ static void unmask_secret(cJSON* obj, const cJSON* stored, const char* key) {
 
 // Applies `apply` to every secret in `config`, pairing each with the same place in `stored` (networks by name)
 static void for_each_secret(cJSON* config, const cJSON* stored, void (*apply)(cJSON*, const cJSON*, const char*)) {
+    // an alert address often holds the secret that protects it
+    apply(cJSON_GetObjectItemCaseSensitive(config, "alerts"), cJSON_GetObjectItemCaseSensitive(stored, "alerts"), "url");
     cJSON* wifi = cJSON_GetObjectItemCaseSensitive(config, "wifi");
     const cJSON* old_wifi = cJSON_GetObjectItemCaseSensitive(stored, "wifi");
     apply(wifi, old_wifi, "password");
@@ -113,6 +115,7 @@ esp_err_t WebServer::api_config_post_handler(httpd_req_t* req) {
     if (invalid.empty() && wifi_i) invalid = validate_wifi_config(wifi_i);
     cJSON* guardian_i = cJSON_GetObjectItemCaseSensitive(p, "guardian");
     if (invalid.empty() && guardian_i) invalid = validate_guardian_config(guardian_i);
+    if (invalid.empty()) invalid = validate_bot_config(p);
     if (!invalid.empty()) {
         cJSON_Delete(p);
         return send_message(req, 400, invalid);

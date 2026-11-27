@@ -47,6 +47,15 @@ std::vector<std::string> BanList::for_nick(const std::string& network, const std
     return modes;
 }
 
+PsramVector<BanRecord> BanList::in_channel(const std::string& network, const std::string& channel) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    PsramVector<BanRecord> found;
+    for (const auto& r : records_) {
+        if (record::is(r.network, network) && record::is(r.channel, channel)) found.push_back(r);
+    }
+    return found;
+}
+
 std::vector<BanRecord> BanList::expired(const std::string& network, const Clock& now) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<BanRecord> due;

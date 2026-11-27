@@ -44,13 +44,14 @@ and `web/` (the pages). Large or rarely used data is kept in PSRAM.
 | **Guardian Sentry** | `main/irc/guardian.*` | Anti-flood, word blacklist, anti-caps, repeated text, join floods, auto-kick list, escalation and entry rules. |
 | **IRC Engine** | `main/irc/irc_*.cpp` | One task per network (TLS or TCP), operator status, protection actions, report channel, dynamic floating limits (`+l`). |
 | **IRC Commands** | `main/irc/commands*.cpp`, `command_help.*` | The command set, one file per group. |
-| **Logic** | `main/logic/` | Masks, channel modes, member lists, auto-op and voice lists, rate limits and send pacing. |
+| **Logic** | `main/logic/` | Masks, channel modes and mode locks, spam detection, member lists, auto-op and voice lists, rate limits, send pacing, the kept log and the `.local` answer. |
 | **Memory** | `main/memory/` | `seen`, `tell`, placed bans and earned voice, saved in the settings partition. |
 | **Bot Settings** | `main/bot_settings.*` | Every behaviour setting described once: loading, ranges and the panel's values. |
 | **OTA Manager** | `main/ota_manager.cpp`, `.h` | Dual-slot firmware updates by web upload or URL download, with automatic rollback. |
 | **Update Checker** | `main/update_checker.cpp`, `logic/releases.*` | Signed online releases: check, notice and upgrade. |
+| **Health & Alerts** | `main/health.*`, `alerts.*`, `mdns.*` | Hang check, restart and memory reports, messages outside IRC, and the `<name>.local` responder. |
 | **NTP Manager** | `main/ntp_manager.cpp`, `.h` | SNTP synchronization and POSIX timezone handling. |
-| **Web Server & UI** | `main/web_api/`, `main/web/` | Built-in `esp_http_server` serving the embedded dashboard (`index.html`, `panel.css`, `panel_*.js`) and its REST APIs. |
+| **Web Server & UI** | `main/web_api/`, `main/web/` | Built-in `esp_http_server` serving the embedded dashboard (`index.html`, `panel.css`, `panel_*.js`, gzipped at build time by `pack_web.py`) and its REST APIs. |
 | **Display Hook** | `main/display_interface.cpp`, `.h` | Modular C++ interface ready for attaching a color SPI TFT screen (ST7789, ILI9341, GC9A01) via DMA. |
 
 ---
@@ -245,6 +246,7 @@ I (1310) IRC: Joined network successfully. Autojoining channels...
    - For TLS, set **Use SSL / TLS** and the port. Set **Verify TLS Certificate** to *No* only for self-signed (LAN) servers.
    - Change your password, and manage user roles, hostmasks and accounts.
    - Execute emergency channel lockdowns (`+mi`) and mass kicks.
+   - See who is in a channel and what is banned or muted there (**Members & Bans** on its card), act on them, and see who is signed in (**Admin & Users > Manage Users > Signed In Now**).
    - Run live IRC commands from the integrated web console.
 
 ---
@@ -358,6 +360,39 @@ Give a `+k` channel its password under **Channel Sentry** (or when adding it), o
 
 The default password only serves to replace it: until then the web session can do nothing else, and `login` on IRC refuses it. A panel session ends after 30 idle minutes (**Bot Behaviour > Rate Limits and Sign-In**); the panel's own refreshing does not count as use. Too many wrong passwords pause that web address or IRC host for a while.
 
+## Spam Filters
+
+Under **Guardian Rules**, each off until you choose an action. They spare staff accounts, and channel operators unless you say otherwise.
+
+- **Links and Channel Adverts:** web addresses (`http://`, `www.`, or `domain.tld/page`) and other channels' names. Colour codes do not hide them. Voiced users can be spared, and listed domains are welcome.
+- **Mass Highlight:** one line naming many of those present.
+- **Nickname Change Flood** and **Join and Part Flood:** one user doing it too often within a time. The second acts when they join once too often; netsplits are not counted.
+
+## Topic and Mode Locks
+
+Set per channel on its card under **Channel Sentry**, or with `topiclock` and `modelock`. The bot (as an operator) puts back a locked topic, and modes locked on or off such as `+nt-s`. Ranks, lists, keys and limits cannot be locked. Changes by administrators of the bot are left alone, and their new topic becomes the locked one; modes of a lockdown are not fought. After three times in a minute (**Bot Behaviour**) the bot leaves the channel as it is for a while, so that two bots never fight.
+
+## Staying Up and Being Told
+
+- **Hang check:** if an IRC connection, the main loop or the web panel stops responding for 5 minutes (**Bot Behaviour > Reliability**), the device restarts.
+- **Kept log:** the newest 24 lines stay in RTC memory through a restart or a crash, and are shown above a marker line. A power cut clears them.
+- **Alerts:** give a webhook or ntfy address (**Bot Behaviour > Alerts Outside IRC**) to hear when a network has been away for a while, when the device restarted after a fault, and when memory runs low. The address is stored masked, and is not written to the log.
+- **Local name:** the panel also opens as `http://polibot.local/` on your own network (**Bot Behaviour > Local Name**).
+
+## Behind a Reverse Proxy
+
+The device speaks plain HTTP. For HTTPS, put your own proxy in front of it, for example Caddy:
+
+```text
+panel.example.org {
+    reverse_proxy 192.168.1.50:80
+}
+```
+
+- Run the proxy **on the same network** as the board, or link them with a VPN such as WireGuard. Never forward the board's port openly to the internet: passwords would travel unencrypted, and anyone could reach the panel past the proxy.
+- Tell the device which address the proxy connects from (**Bot Behaviour > Reverse Proxy**). Sign-in reports, the session list and the sign-in lockout then use each visitor's address from `X-Forwarded-For`, instead of treating everybody as the proxy. An administrator who connects through a proxy not yet trusted is offered a button for it.
+- The header is believed only from the listed addresses, and only its last entry, which is the one your proxy adds. With a second proxy or a CDN in front, that is the address of the outer one unless your proxy is set to trust it.
+
 ## Seen and Tell
 
 `seen <nick>` says when somebody was last around and what they did; other channels' details are only shown to their members and staff. `tell <nick> <message>` is delivered the next time that nickname speaks or joins. Both can be limited or switched off under **Bot Behaviour**.
@@ -382,7 +417,7 @@ The version number lives in `version.txt`. For each release: change it, add an e
 
 ```text
 /ctcp PoliBOT VERSION
-PoliBOT v0.2.0 - Running on ESP32-S3 (2 cores @ 240 MHz, 16 MB flash) - ESP-IDF v5.2.2
+PoliBOT v0.2.1 - Running on ESP32-S3 (2 cores @ 240 MHz, 16 MB flash) - ESP-IDF v5.2.2
 ```
 
 ---
@@ -447,6 +482,7 @@ You can send commands directly in guarded channels using the configured prefix (
 - `/msg PoliBOT login <username> <password>` — Authenticate with explicit username.
 - `/msg PoliBOT logout` — Terminate your authenticated session.
 - `/msg PoliBOT whoami` — Display your active identity and global/channel permissions.
+- `/msg PoliBOT passwd <current> <new>` — Change the password of your own account; log in again afterwards.
 
 **Who is trusted.** Permissions (including auto-op for admins, and exemption from flood/word filters) require one of three things: a password `login`; a hostmask that names a host, such as `*!alice@home.example.org` or `*!*@home.example.org` (a mask without one, like `*!*@*`, `alice!*@*` or `*!alice@*`, only allows logging in, since anyone can choose a nickname or ident); or a **services account** listed on the bot user as `network/account` (**Admin & Users > Manage Users**). A login lasts while your nick and hostmask stay the same.
 
@@ -466,7 +502,9 @@ You can send commands directly in guarded channels using the configured prefix (
 - `!op` / `!deop`, `!voice` / `!devoice`, `!half` / `!dehalf` (also `!halfop` / `!dehalfop`, `!hop` / `!dehop`) — Grant or revoke operator (`+o`), voice (`+v`) or half-operator (`+h`) status: `[#chan] [nick...]`. Several nicknames can be named at once; with none, it applies to you.
 - `!kick [#chan] <nick> [reason]` — Kick user from channel.
 - `!quiet [#chan] <nick|mask> [time]` / `!unquiet [#chan] <nick|mask>` — Mute or unmute, optionally for a time such as `30m`. The mode is set per network (`+q {mask}` by default, as on Solanum servers; `+b ~m:{mask}` on SekurIRCd).
-- `!topic [#chan] <new topic>` — Update channel topic.
+- `!topic [#chan] <new topic>` — Update channel topic (a locked one only by an administrator).
+- `!invite [#chan] <nick>` — Invite somebody.
+- `!bans [#chan]` — The bans and mutes the bot has set there, told to you alone.
 
 ### Admin Commands
 - `!dynlimit [#chan] <on [slots]|off|slots>` — Enable/disable the floating channel limit (`+l users + slots`, adjusted gradually: see [Channel Protection](#channel-protection)).
@@ -475,6 +513,8 @@ You can send commands directly in guarded channels using the configured prefix (
 - `!entrymsg <#chan> [<message>|off]` — Show, set or disable the rules/welcome `NOTICE` on join.
 - `!badwords [#chan] [list|add <word>|del <word>]` — Show or edit the channel's forbidden words.
 - `!ban [#chan] <nick|mask> [time]` / `!unban [#chan] <nick|mask>` — Ban (a nick is banned by host), optionally for a time such as `2h` or `7d`, or unban.
+- `!kickban [#chan] <nick> [time] [reason]` (or `!kb`) — Ban by host and kick.
+- `!topiclock [#chan] [on|off|<topic>]` / `!modelock [#chan] [<modes>|off]` — [Topic and mode locks](#topic-and-mode-locks).
 - `!akick [#chan|*] list | add <nick|mask> [reason] | del <nick|mask>` — The saved auto-kick list.
 - `!autoop` / `!autohop` / `!autovoice` `[#chan] [list|add <who>|del <who>]` — The channel's [automatic lists](#automatic-operator-half-op-and-voice).
 - `!timevoice [#chan] [on|off|<time>]` — Timed voice, e.g. `!timevoice #chan 2h`.

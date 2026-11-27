@@ -1,6 +1,7 @@
 // IRCClient: sockets, TLS, sending and receiving
 #include "irc_client.h"
 #include "irc_internal.h"
+#include "health.h"
 #include <esp_timer.h>
 #include <esp_crt_bundle.h>
 #include <lwip/sockets.h>
@@ -216,6 +217,7 @@ void IRCClient::read_loop() {
 
     // Wakes once a second, so that stop and reconnect are honoured promptly; sooner while lines wait
     while (connected_ && !stop_ && !reconnect_) {
+        watch_beat(watch_);
         tick();
         flush_queue();
         const int ping_timeout = settings()->ping_timeout;

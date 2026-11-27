@@ -3,6 +3,8 @@
 #include "guardian.h"
 #include "irc_config.h"
 #include "irc_masks.h"
+#include "mdns_reply.h"
+#include "proxy.h"
 #include <cstring>
 
 std::string validate_wifi_config(const cJSON* wifi) {
@@ -56,6 +58,24 @@ std::string validate_guardian_config(const cJSON* guardian) {
         if (!cJSON_IsString(mask) || !mask_is_specific(mask->valuestring) || strchr(mask->valuestring, ' ')) {
             return std::string("Auto-kick mask '") + (cJSON_IsString(mask) ? mask->valuestring : "") + "' must name a nick or host, without spaces.";
         }
+    }
+    return "";
+}
+
+std::string validate_bot_config(const cJSON* config) {
+    const cJSON* url = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(config, "alerts"), "url");
+    if (cJSON_IsString(url) && url->valuestring[0] &&
+        (strlen(url->valuestring) > 256 || strpbrk(url->valuestring, " \r\n") ||
+         (strncmp(url->valuestring, "http://", 7) != 0 && strncmp(url->valuestring, "https://", 8) != 0))) {
+        return "The alert address starts with http:// or https:// and has no spaces (256 characters at most).";
+    }
+    const cJSON* name = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(config, "network"), "mdns_name");
+    if (cJSON_IsString(name) && name->valuestring[0] && !valid_host_name(name->valuestring)) {
+        return "The local name uses 1-32 letters, digits or hyphens, without \".local\".";
+    }
+    const cJSON* proxies = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(config, "network"), "trusted_proxies");
+    if (cJSON_IsString(proxies) && !valid_proxy_list(proxies->valuestring)) {
+        return "Trusted proxies are up to 8 IPv4 addresses, such as 192.168.1.10, separated by commas.";
     }
     return "";
 }

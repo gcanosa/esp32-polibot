@@ -53,7 +53,7 @@ bool IRCClient::allowed(const Command& c, const char* role, const std::string& c
 
 // The channel a command is about: given as first argument, else the one it was sent to, else the only one joined
 void IRCClient::resolve_channel(Command& c, std::string& channel) {
-    if (!c.args.empty() && c.args[0][0] == '#') {
+    if (!c.args.empty() && (c.args[0][0] == '#' || c.args[0][0] == '&')) {
         channel = c.args[0];
         c.args.erase(c.args.begin());
         return;
@@ -84,14 +84,16 @@ void IRCClient::handle_command(const std::string& target, const std::string& sen
     if (hostmask != WEB_CONSOLE_HOSTMASK && !admit_command(c)) return;
 
     // what the report channel is told, if the command changes something; passwords and message texts stay out
-    const size_t words = c.name == "admin" ? 2 : c.name == "say" || c.name == "raw" || c.name == "join" ? 1 : c.args.size();
+    const size_t words = c.name == "passwd" || c.name == "password" ? 0
+                       : c.name == "admin" ? 2
+                       : c.name == "say" || c.name == "raw" || c.name == "join" || c.name == "topiclock" ? 1 : c.args.size();
     std::string asked = c.name;
     for (size_t i = 0; i < std::min(words, c.args.size()); i++) asked += " " + c.args[i];
     if (!is_pm) asked += " (in " + target + ")";
 
     // each handler returns true once it has dealt with the command
-    if (!session_command(c) && !info_command(c) && !seen_command(c) && !tell_command(c) && !akick_command(c) &&
-        !status_command(c) && !moderator_command(c) && !ban_command(c) && !access_command(c) && !timevoice_command(c) &&
-        !channel_command(c)) owner_command(c);
+    if (!session_command(c) && !password_command(c) && !info_command(c) && !seen_command(c) && !tell_command(c) && !akick_command(c) &&
+        !status_command(c) && !moderator_command(c) && !ban_command(c) && !bans_command(c) && !access_command(c) && !timevoice_command(c) &&
+        !lock_command(c) && !channel_command(c)) owner_command(c);
     if (c.audit) report(ReportKind::moderation, c.nick + " used: " + asked);
 }

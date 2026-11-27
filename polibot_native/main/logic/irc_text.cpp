@@ -139,7 +139,7 @@ std::string redact_command(const std::string& line) {
     }
     const std::string low = " " + irc_lower(normal) + " ";
     // typed in the console, or sent raw to a server or service
-    for (const char* marker : {"!login ", "!auth ", "!admin add ", "!admin passwd ", "identify ", "register ", " oper ", " pass ",
+    for (const char* marker : {"!login ", "!auth ", "!passwd ", "!admin add ", "!admin passwd ", "identify ", "register ", " oper ", " pass ",
                                "password ", "+k ", "-k ", "+sk "}) {
         size_t at = low.find(marker);
         if (at == std::string::npos) continue;

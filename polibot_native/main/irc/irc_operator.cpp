@@ -102,6 +102,7 @@ void IRCClient::on_operator(const std::string& channel) {
     }
     sweep_akicks(channel);
     review_modes(channel);
+    enforce_locks(channel);
 }
 
 void IRCClient::request_ops(const std::string& channel) {

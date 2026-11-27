@@ -1,20 +1,6 @@
 // Signing in and out, and changing one's own password
 #include "web_server.h"
 #include <cstring>
-#include <lwip/sockets.h>
-
-// The address a request came from, for counting failed sign-ins
-static std::string client_address(httpd_req_t* req) {
-    sockaddr_in6 peer = {};
-    socklen_t length = sizeof(peer);
-    char text[INET6_ADDRSTRLEN] = "unknown";
-    if (getpeername(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&peer), &length) == 0) {
-        if (peer.sin6_family == AF_INET6) inet_ntop(AF_INET6, &peer.sin6_addr, text, sizeof(text));
-        else inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(&peer)->sin_addr, text, sizeof(text));
-    }
-    const std::string address = text;
-    return address.rfind("::FFFF:", 0) == 0 || address.rfind("::ffff:", 0) == 0 ? address.substr(7) : address;
-}
 
 // 2. POST /api/login
 esp_err_t WebServer::api_login_handler(httpd_req_t* req) {
@@ -40,7 +26,7 @@ esp_err_t WebServer::api_login_handler(httpd_req_t* req) {
 
     UserAccount user;
     if (g_security_mgr.authenticate(uname, pw, user)) {
-        std::string token = g_security_mgr.create_web_session(user.username);
+        std::string token = g_security_mgr.create_web_session(user.username, address);
         g_irc_manager.report(ReportKind::security, "Web panel: " + user.username + " (" + user.global_role + ") signed in from " + address + ".");
         cJSON* res = cJSON_CreateObject();
         cJSON_AddStringToObject(res, "status", "ok");
@@ -101,6 +87,11 @@ esp_err_t WebServer::api_me_handler(httpd_req_t* req) {
         cJSON_AddStringToObject(cr, pair.first.c_str(), pair.second.c_str());
     }
     cJSON_AddItemToObject(res, "channel_roles", cr);
+    // an administrator behind a proxy the device does not know is offered to trust it
+    if (!user.default_password && get_role_level(user.global_role) >= get_role_level("admin")) {
+        const std::string proxy = untrusted_proxy(req);
+        if (!proxy.empty()) cJSON_AddStringToObject(res, "proxy", proxy.c_str());
+    }
     return send_json(req, res, 200);
 }
 

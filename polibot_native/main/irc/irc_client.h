@@ -58,6 +58,9 @@ struct ChannelState {
     bool moderated = false;  // +m: nobody new earns voice
     bool modes_asked = false;
     uint32_t paused_at = 0;  // since when the waiting time has stood still
+    std::string topic;       // as the server has it
+    int reverts = 0;         // of locked modes or topic, in the minute that began at reverts_since
+    int64_t reverts_since = -60;
 };
 
 struct PendingJoin {
@@ -80,6 +83,7 @@ std::string software_description();
 //   irc_dispatch    incoming lines       irc_recall      seen and tell
 //   irc_channels    channel members      irc_botmode     bot user mode
 //   irc_accounts    services accounts     irc_automodes   auto-op, auto-voice, timed voice
+//   irc_locks       topic and mode locks
 //   commands*       IRC commands
 class IRCClient : public std::enable_shared_from_this<IRCClient> {
 public:
@@ -106,6 +110,12 @@ public:
     void review_modes(const std::string& channel = "");  // "" = all; the connection task does the rest
     std::string access_who(const std::string& typed);    // what a list entry stores for what was typed
     void devoice_restricted(const std::string& channel, const std::string& change); // before a ban or a mute
+    void enforce_locks(const std::string& channel); // puts back a locked topic, and asks for the modes to check
+    std::string current_topic(const std::string& channel);
+    // Copies of who is there and what is known; false if the bot is not in the channel
+    bool channel_snapshot(const std::string& channel, PsramVector<Member>& members, int& op, std::string& topic);
+    bool is_mute(const std::string& mode); // a recorded "+x ..." change that this network uses to mute
+    std::pair<bool, std::string> lift_ban(const std::string& channel, const std::string& mode); // one the bot placed
 
     // Logs the event and tells the report channel, if there is one
     void report(ReportKind kind, const std::string& text); // waits for the connection task to send it
@@ -138,6 +148,7 @@ private:
     std::atomic<bool> stop_{false};
     std::atomic<bool> reconnect_{false};
     std::atomic<bool> wake_{false};
+    int watch_ = -1; // the connection task's place in the hang check
     int64_t start_time_ = 0;
     int64_t last_activity_ = 0;
     int64_t last_ctcp_reply_ = -100;
@@ -217,7 +228,7 @@ private:
     void on_join(const std::string& channel, const std::string& nick, const std::string& hostmask, bool from_me);
     void on_kick(const std::string& channel, const std::string& victim, const std::string& by, const std::string& reason, bool me);
     void on_quit_or_nick(bool quit, const std::string& nick, const std::string& hostmask, const std::string& detail, bool from_me);
-    void on_mode(const std::string& channel, const std::vector<std::string>& modes, const std::string& by);
+    void on_mode(const std::string& channel, const std::vector<std::string>& modes, const std::string& by, const std::string& by_hostmask);
     void on_names(const std::string& channel, const std::string& names);
     void on_who(const std::string& channel, const std::string& userhost, const std::string& nick, const std::string& flags);
 
@@ -226,6 +237,12 @@ private:
     void grant_everywhere(const std::string& nick); // services say who they are
     void note_voice(const std::string& channel, const PsramVector<Member>& people, bool lost);
     void on_channel_modes(const std::string& channel, const std::vector<std::string>& modes); // 324
+
+    // Topic and mode locks (irc_locks.cpp)
+    void note_topic(const std::string& channel, const std::string& topic);
+    void on_topic(const std::string& channel, const std::string& nick, const std::string& hostmask, const std::string& topic);
+    void keep_mode_lock(const std::string& channel, const std::string& by, const std::string& by_hostmask, const std::vector<ModeChange>& changes);
+    bool may_revert(const std::string& channel); // false once a channel has been put back too often
 
     // Who is signed in to services (irc_accounts.cpp)
     bool learn_account(const std::string& nick, const std::string& userhost, const std::string& account);
@@ -246,6 +263,8 @@ private:
 
     // Protection
     bool moderate(const std::string& channel, const std::string& nick, const std::string& hostmask, const std::string& message);
+    LineContext line_context(const std::string& channel, const std::string& nick, const std::string& message, bool& is_operator);
+    void note_presence(const std::string& channel, const std::string& nick, const std::string& hostmask, bool joined);
     std::string member_userhost(const std::string& nick); // from the channels, else from "seen"
     std::string mask_for(const std::string& target);
     void raid_lockdown(const GuardianAction& act);
@@ -279,6 +298,9 @@ private:
     __attribute__((noinline)) bool status_command(Command& c);
     __attribute__((noinline)) bool moderator_command(Command& c);
     __attribute__((noinline)) bool ban_command(Command& c);
+    __attribute__((noinline)) bool bans_command(Command& c);
+    __attribute__((noinline)) bool password_command(Command& c);
+    __attribute__((noinline)) bool lock_command(Command& c);
     __attribute__((noinline)) bool channel_command(Command& c);
     __attribute__((noinline)) bool access_command(Command& c);
     __attribute__((noinline)) bool timevoice_command(Command& c);

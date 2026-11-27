@@ -1,4 +1,6 @@
 #include "guardian.h"
+#include "mode_lock.h"
+#include "spam.h"
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <algorithm>
@@ -151,6 +153,12 @@ void GuardianEngine::load_rules() {
                     if (cJSON_IsNumber(minutes)) cfg.timed_voice.minutes = std::min(std::max(minutes->valueint, 1), MAX_VOICE_MINUTES);
                     cJSON* op = cJSON_GetObjectItemCaseSensitive(ch, "auto_op");
                     if (cJSON_IsBool(op)) cfg.auto_op = cJSON_IsTrue(op);
+                    cJSON* topic = cJSON_GetObjectItemCaseSensitive(ch, "topic_lock");
+                    cJSON* kept = cJSON_GetObjectItemCaseSensitive(topic, "topic");
+                    cfg.topic_lock = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(topic, "enabled"));
+                    if (cJSON_IsString(kept)) cfg.topic = kept->valuestring;
+                    cJSON* modes = cJSON_GetObjectItemCaseSensitive(ch, "mode_lock");
+                    if (cJSON_IsString(modes)) cfg.mode_lock = clean_mode_lock(modes->valuestring);
 
                     channel_settings_[ch_name] = cfg;
                 }
@@ -233,6 +241,12 @@ void GuardianEngine::save_channel_config(const std::string& network, const std::
     cJSON_AddBoolToObject(voice, "enabled", cfg.timed_voice.enabled);
     cJSON_AddNumberToObject(voice, "minutes", cfg.timed_voice.minutes);
     if (cfg.auto_op >= 0) cJSON_AddBoolToObject(ch_obj, "auto_op", cfg.auto_op == 1);
+    if (cfg.topic_lock || !cfg.topic.empty()) {
+        cJSON* topic = cJSON_AddObjectToObject(ch_obj, "topic_lock");
+        cJSON_AddBoolToObject(topic, "enabled", cfg.topic_lock);
+        cJSON_AddStringToObject(topic, "topic", cfg.topic.c_str());
+    }
+    if (!cfg.mode_lock.empty()) cJSON_AddStringToObject(ch_obj, "mode_lock", cfg.mode_lock.c_str());
 
     cJSON_DeleteItemFromObjectCaseSensitive(chs, ch_lower.c_str());
     cJSON_AddItemToObject(chs, ch_lower.c_str(), ch_obj);
@@ -343,7 +357,8 @@ GuardianAction GuardianEngine::verdict_locked(const std::string& action, const s
     return act;
 }
 
-std::vector<GuardianAction> GuardianEngine::inspect_message(const std::string& network, const std::string& channel, const std::string& nick, const std::string& hostmask, const std::string& message) {
+std::vector<GuardianAction> GuardianEngine::inspect_message(const std::string& network, const std::string& channel, const std::string& nick, const std::string& hostmask,
+                                                            const std::string& message, const LineContext& line) {
     std::vector<GuardianAction> actions;
 
     // Moderators or higher bypass sentry
@@ -392,7 +407,22 @@ std::vector<GuardianAction> GuardianEngine::inspect_message(const std::string& n
         }
     }
 
-    // 3. Anti-Caps Check
+    // 3. Advertising: addresses and other channels
+    if (settings->links_action != "off" && !(settings->links_spare_voiced && line.voiced)) {
+        const std::string advert = find_advert(message, channel, settings->links_channels, settings->links_allowed);
+        if (!advert.empty()) {
+            actions.push_back(verdict_locked(settings->links_action, settings->links_reason + " (" + advert.substr(0, 60) + ")", channel, nick, offender, *settings));
+            return actions;
+        }
+    }
+
+    // 4. Naming many of those present at once
+    if (settings->highlight_action != "off" && line.named >= settings->highlight_nicks) {
+        actions.push_back(verdict_locked(settings->highlight_action, settings->highlight_reason, channel, nick, offender, *settings));
+        return actions;
+    }
+
+    // 5. Anti-Caps Check
     if (caps_enabled_) {
         size_t letters = 0;
         size_t caps = 0;
@@ -414,7 +444,7 @@ std::vector<GuardianAction> GuardianEngine::inspect_message(const std::string& n
         }
     }
 
-    // 4. The same text from several users
+    // 6. The same text from several users
     if (settings->clone_action != "off" && (int)message.size() >= settings->clone_min_length) {
         const std::vector<std::string> nicks = clones_.add(room, who, nick, message, now_sec, settings->clone_users, settings->clone_seconds);
         if (nicks.empty()) return actions;
@@ -477,5 +507,45 @@ std::vector<GuardianAction> GuardianEngine::on_user_join(const std::string& netw
         actions.push_back(act);
     }
 
+    return actions;
+}
+
+std::vector<GuardianAction> GuardianEngine::on_nick_change(const std::string& network, const std::vector<std::string>& channels, const std::string& nick,
+                                                           const std::string& hostmask) {
+    std::vector<GuardianAction> actions;
+    const auto settings = g_settings.get();
+    if (settings->nick_action == "off" || channels.empty()) return actions;
+    // staff in any of the channels are left alone altogether
+    for (const auto& channel : channels) {
+        if (security_mgr_.has_permission(network, nick, hostmask, "mod", channel)) return actions;
+    }
+    const std::string who = user_host(hostmask).empty() ? nick : user_host(hostmask);
+    const std::string key = irc_lower(network + "/" + who);
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (churn_.hit("nick " + key, esp_timer_get_time() / 1000000, settings->nick_seconds) <= settings->nick_changes) return actions;
+    churn_.clear("nick " + key);
+    for (const auto& channel : channels) {
+        actions.push_back(verdict_locked(settings->nick_action, settings->nick_reason, channel, nick, irc_lower(network + "/" + channel + ":" + who), *settings));
+        if (settings->nick_action == "report") break; // once is enough
+    }
+    return actions;
+}
+
+std::vector<GuardianAction> GuardianEngine::on_presence(const std::string& network, const std::string& channel, const std::string& nick,
+                                                        const std::string& hostmask, bool joined) {
+    std::vector<GuardianAction> actions;
+    const auto settings = g_settings.get();
+    if (settings->presence_action == "off" || security_mgr_.has_permission(network, nick, hostmask, "mod", channel)) return actions;
+    const std::string who = user_host(hostmask).empty() ? nick : user_host(hostmask);
+    const std::string offender = irc_lower(network + "/" + channel + ":" + who);
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    const int count = churn_.hit("stay " + offender, esp_timer_get_time() / 1000000, settings->presence_seconds);
+    if (!joined || count <= settings->presence_count) return actions;
+    churn_.clear("stay " + offender);
+    GuardianAction act = verdict_locked(settings->presence_action, settings->presence_reason, channel, nick, offender, *settings);
+    act.seconds = settings->presence_minutes * 60;
+    actions.push_back(act);
     return actions;
 }

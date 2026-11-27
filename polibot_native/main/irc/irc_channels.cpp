@@ -1,6 +1,7 @@
 // IRCClient: who is where, kept up to date from the server
 #include "irc_client.h"
 #include "irc_internal.h"
+#include "mode_lock.h"
 #include <cstring>
 
 static constexpr int NETSPLIT_MEMORY = 30 * 60;  // how long a split user may take to come back
@@ -35,6 +36,7 @@ bool IRCClient::channel_event(const std::string& command, const std::vector<std:
         forget_if_gone(leaving);
         if (!from_me) {
             note_seen(nick, hostmask, 'p', channel, args.empty() ? "" : trailing);
+            note_presence(channel, nick, hostmask, false);
         }
     } else if (command == "KICK") {
         if (args.size() >= 2) on_kick(args[0], args[1], nick, trailing, same(args[1], current_nick()));
@@ -46,7 +48,13 @@ bool IRCClient::channel_event(const std::string& command, const std::vector<std:
     } else if (command == "MODE") {
         std::vector<std::string> modes(args.empty() ? args.end() : args.begin() + 1, args.end());
         if (!trailing.empty()) modes.push_back(trailing);
-        if (!args.empty() && !modes.empty()) on_mode(args[0], modes, nick);
+        if (!args.empty() && !modes.empty()) on_mode(args[0], modes, nick, hostmask);
+    } else if (command == "TOPIC") {
+        if (!args.empty()) on_topic(first, nick, hostmask, trailing.empty() && args.size() > 1 ? args[1] : trailing);
+    } else if (command == "331") { // no topic is set
+        if (!subject.empty()) note_topic(subject, "");
+    } else if (command == "332") { // <me> <channel> :topic
+        if (!subject.empty()) note_topic(subject, trailing.empty() && args.size() > 2 ? args[2] : trailing);
     } else if (command == "INVITE") {
         const std::string channel = subject.empty() ? trailing : subject;
         if (wanted_channel(channel)) send_raw(join_line(channel));
@@ -116,12 +124,13 @@ bool IRCClient::channel_event(const std::string& command, const std::vector<std:
 void IRCClient::on_channel_modes(const std::string& channel, const std::vector<std::string>& modes) {
     const bool reports = is_report_channel(channel);
     bool has_key = false;
-    std::string key;
+    std::string key, present;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         auto it = channels_.find(irc_lower(channel));
         bool moderated = false;
         for (const auto& change : parse_modes(support_, modes)) {
+            if (change.add) present += change.mode;
             if (change.mode == 'm' && change.add) moderated = true;
             if (change.mode == 'k' && change.add) {
                 has_key = true;
@@ -130,7 +139,15 @@ void IRCClient::on_channel_modes(const std::string& channel, const std::vector<s
         }
         if (it != channels_.end()) it->second.moderated = moderated;
     }
-    if (reports) check_report_key(has_key, key);
+    if (reports) {
+        check_report_key(has_key, key);
+        return;
+    }
+    const ChannelGuardianConfig rules = guardian_.get_channel_config(name_, channel);
+    if (rules.mode_lock.empty() || !can_act(channel)) return;
+    const std::string skip = rules.lockdown ? g_settings.get()->lockdown_modes : "";
+    const std::string fix = missing_modes(rules.mode_lock, present, skip);
+    if (!fix.empty() && may_revert(channel)) send_raw("MODE " + channel + " " + fix);
 }
 
 void IRCClient::on_join(const std::string& channel, const std::string& nick, const std::string& hostmask, bool from_me) {
@@ -167,6 +184,7 @@ void IRCClient::on_join(const std::string& channel, const std::string& nick, con
     for (const auto& act : guardian_.on_user_join(name_, channel, nick, hostmask, !returning && !reports)) {
         execute_action(act);
     }
+    if (!returning) note_presence(channel, nick, hostmask, true);
     grant_modes(channel, nick, true);
     deliver_tells(nick, channel);
 }
@@ -228,7 +246,33 @@ void IRCClient::on_quit_or_nick(bool quit, const std::string& nick, const std::s
     }
     if (shared.empty()) return;
     note_seen(nick, hostmask, quit ? 'q' : 'n', shared, detail);
-    if (!quit) deliver_tells(detail, shared);
+    if (quit) {
+        // those lost in a netsplit did not choose to leave
+        if (!is_netsplit_reason(detail)) {
+            for (const auto& channel : affected) note_presence(channel, nick, hostmask, false);
+        }
+        return;
+    }
+    deliver_tells(detail, shared);
+    if (from_me) return;
+    const bool spare_ops = g_settings.get()->exempt_ops;
+    std::vector<std::string> judged;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        for (const auto& channel : affected) {
+            auto it = channels_.find(irc_lower(channel));
+            if (it == channels_.end() || (!cfg_->report_channel.empty() && same(cfg_->report_channel, channel))) continue;
+            const Member* member = it->second.members.find(detail);
+            if (!(spare_ops && member && member->is_operator())) judged.push_back(channel);
+        }
+    }
+    const std::string renamed = detail + hostmask.substr(std::min(hostmask.find('!'), hostmask.size()));
+    for (const auto& act : guardian_.on_nick_change(name_, judged, detail, renamed)) execute_action(act);
+}
+
+void IRCClient::note_presence(const std::string& channel, const std::string& nick, const std::string& hostmask, bool joined) {
+    if (is_report_channel(channel)) return;
+    for (const auto& act : guardian_.on_presence(name_, channel, nick, hostmask, joined)) execute_action(act);
 }
 
 void IRCClient::on_names(const std::string& channel, const std::string& names) {
@@ -263,12 +307,13 @@ void IRCClient::on_names(const std::string& channel, const std::string& names) {
     }
 }
 
-void IRCClient::on_mode(const std::string& channel, const std::vector<std::string>& modes, const std::string& by) {
+void IRCClient::on_mode(const std::string& channel, const std::vector<std::string>& modes, const std::string& by, const std::string& by_hostmask) {
     const bool reports = is_report_channel(channel);
     int my_op = -1;
     bool key_changed = false, has_key = false;
     std::string key;
     PsramVector<Member> lost, voiced; // whose voice was taken away or given
+    std::vector<ModeChange> changes;
     // a server changes modes when it mends a netsplit: nobody decided anything then
     const bool by_server = by.find('.') != std::string::npos;
     {
@@ -276,7 +321,8 @@ void IRCClient::on_mode(const std::string& channel, const std::vector<std::strin
         auto it = channels_.find(irc_lower(channel));
         if (it == channels_.end()) return; // our own user modes, or a channel we are not in
         const std::string me = current_nick_.empty() ? cfg_->nick : current_nick_;
-        for (const auto& change : parse_modes(support_, modes)) {
+        changes = parse_modes(support_, modes);
+        for (const auto& change : changes) {
             if (support_.prefix_modes.find(change.mode) != std::string::npos && !change.param.empty()) {
                 Member& member = it->second.members.add(change.param);
                 member.set_mode(change.mode, change.add);
@@ -311,6 +357,7 @@ void IRCClient::on_mode(const std::string& channel, const std::vector<std::strin
     }
     if (my_op >= 0) note_operator(channel, my_op == 1, by);
     if (reports && key_changed) check_report_key(has_key, key);
+    if (!reports) keep_mode_lock(channel, by, by_hostmask, changes);
     note_voice(channel, voiced, false);
     note_voice(channel, lost, true);
 }

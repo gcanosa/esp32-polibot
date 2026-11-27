@@ -42,11 +42,26 @@ struct Identity {
 struct IrcSession {
     std::string username;
     std::string hostmask;
+    std::string network;
+    std::string nick;
 };
 
 struct WebSession {
     std::string username;
     int64_t last_used; // microseconds since boot, which also orders them; sessions left idle expire
+    uint32_t id;       // names the session in the panel, which never sees another one's token
+    std::string address;
+};
+
+// Somebody signed in, as the panel shows it
+struct SessionView {
+    std::string id;      // "w<number>" or "i<network> <nick>"
+    std::string user;
+    std::string network; // "" for the web panel
+    std::string nick;
+    std::string from;    // hostmask, or the browser's address
+    int idle = -1;       // seconds, web sessions only
+    bool current = false;
 };
 
 class SecurityManager {
@@ -65,6 +80,9 @@ public:
     // Authentication & Sessions
     std::pair<bool, std::string> irc_login(const std::string& network, const std::string& nick, const std::string& hostmask, const std::string& password, const std::string& username = "");
     std::pair<bool, std::string> irc_logout(const std::string& network, const std::string& nick);
+    // The account's owner changes its password over IRC: the current one is needed, and wrong ones count
+    std::pair<bool, std::string> change_password_on_irc(const std::string& network, const std::string& hostmask, const std::string& username,
+                                                        const std::string& current, const std::string& next);
     std::string get_role(const std::string& network, const std::string& nick, const std::string& hostmask, const std::string& channel = "");
     bool has_permission(const std::string& network, const std::string& nick, const std::string& hostmask, const std::string& required_role, const std::string& channel = "");
     bool get_effective_user(const std::string& network, const std::string& nick, const std::string& hostmask, UserAccount& out_user);
@@ -86,10 +104,15 @@ public:
 
     // Web Auth
     bool authenticate(const std::string& username, const std::string& password, UserAccount& out_user);
-    std::string create_web_session(const std::string& username);
+    std::string create_web_session(const std::string& username, const std::string& address);
     // counts_as_activity is false for the panel's own refreshing, which must not keep a session alive
     bool validate_web_session(const std::string& token, UserAccount& out_user, bool counts_as_activity = true);
     void destroy_web_session(const std::string& token);
+
+    // Who is signed in, on IRC and in the panel
+    std::vector<SessionView> sessions(const std::string& current_token);
+    // Signs somebody out. Empty if done (`username` then says who), otherwise why not.
+    std::string end_session(const std::string& id, bool by_owner, std::string& username);
 
     // User management
     // Returns {saved, message}. An empty password, role or mask list keeps what the account has; channel
@@ -107,6 +130,7 @@ private:
     std::vector<UserAccount> users_;
     std::map<std::string, IrcSession> irc_sessions_;  // "network nick" (lower case) -> session
     std::map<std::string, WebSession> web_sessions_;  // token -> session
+    uint32_t web_session_count_ = 0;
     LoginGuard logins_;
     AccountBook signed_in_;
     std::mutex mutex_;

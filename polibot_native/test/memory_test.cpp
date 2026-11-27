@@ -61,6 +61,9 @@ int main() {
         m.bans.add("net", "#c", "+q *!*@h", "troll", 0, now);
         m.bans.add("net", "#c", "+b *!*@h", "troll", 60, now); // replaces the first
         assert(m.bans.for_nick("net", "#C", "TROLL").size() == 2);
+        m.bans.add("net", "#other", "+b *!*@x", "", 0, now);
+        const auto listed = m.bans.in_channel("NET", "#C");
+        assert(listed.size() == 2 && std::string(listed[0].mode) == "+b *!*@h" && std::string(listed[1].mode) == "+q *!*@h");
         assert(m.bans.expired("net", {1059, 0}).empty() && m.bans.expired("net", {1060, 0}).size() == 1);
         assert(m.save(dir, now, 600, false));
         BotMemory later; // restarted 30 s later, clock known

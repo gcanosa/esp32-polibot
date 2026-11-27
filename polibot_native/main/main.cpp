@@ -22,6 +22,8 @@
 #include "psram_alloc.h"
 #include "health.h"
 #include "update_checker.h"
+#include "alerts.h"
+#include "mdns.h"
 
 static const char* TAG = "MAIN";
 
@@ -56,6 +58,7 @@ static void heartbeat_task(void* pv) {
     constexpr int64_t BEAT = 10 * 1000000; // microseconds
     int64_t next_beat = esp_timer_get_time() + BEAT;
     bool save_failed = false;
+    const int watched = watch_start("The main loop");
     while (true) {
         // every ten seconds, and woken in between to write settings an IRC connection has changed
         const int64_t wait = next_beat - esp_timer_get_time();
@@ -65,6 +68,9 @@ static void heartbeat_task(void* pv) {
         save_failed = !saved;
         if (esp_timer_get_time() < next_beat) continue;
         next_beat = esp_timer_get_time() + BEAT;
+        watch_beat(watched);
+        watch_limit(g_settings.get()->stuck_minutes);
+        g_web_server.check_alive(); // after the main loop has its place: a stuck main loop is named first
         // A freshly flashed image is kept only after 30 s of stable runtime; a crash or reset before that rolls back.
         if (web_ok && g_wifi_mgr.reachable() && ticks < 3 && ++ticks == 3) g_ota_mgr.confirm_running_image();
         uint32_t free_kb = esp_get_free_heap_size() / 1024;
@@ -80,6 +86,8 @@ static void heartbeat_task(void* pv) {
         save_memory(false);
         check_memory();
         g_updates.tick();
+        alerts_tick();
+        mdns_tick();
     }
 }
 
@@ -88,6 +96,7 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "   PoliBOT Sentry - ESP32-S3 Native C/C++ Engine       ");
     ESP_LOGI(TAG, "=======================================================");
     ESP_LOGI(TAG, "Version %s", esp_app_get_description()->version);
+    g_log_buffer.restore(esp_reset_reason() == ESP_RST_POWERON); // before the first line is logged
 
     // The configuration tree and every JSON message live in external RAM (before the first cJSON call)
     cJSON_Hooks json_memory = {psram_malloc, free};
@@ -130,6 +139,8 @@ extern "C" void app_main(void) {
     bool web_ok = g_web_server.start(80);
 
     // 6. Start one IRC task per configured network
+    watch_limit(g_settings.get()->stuck_minutes);
+    watch_hangs(); // restarts the device if the main loop or a connection stops responding
     g_irc_manager.start();
     report_restart(); // waits in each network's queue until its report channel is ready
 

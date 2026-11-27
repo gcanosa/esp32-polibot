@@ -29,6 +29,7 @@ public:
     // The modes set against a nickname in a channel
     std::vector<std::string> for_nick(const std::string& network, const std::string& channel, const std::string& nick);
     std::vector<BanRecord> expired(const std::string& network, const Clock& now); // does not remove them
+    PsramVector<BanRecord> in_channel(const std::string& network, const std::string& channel); // oldest first
     // True if `matches` accepts one of the modes set in this channel ("+b *!*@host"); nothing is copied
     template <typename F>
     bool any_of(const std::string& network, const std::string& channel, F matches) {

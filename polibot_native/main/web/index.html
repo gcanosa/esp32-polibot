@@ -87,6 +87,14 @@
   <button class="btn btn-red btn-end" data-icon="power" onclick="rebootESP()">Reboot</button>
 </div>
 
+<div id="proxy-banner" class="update-banner" role="status" hidden>
+  <strong id="proxy-banner-text"></strong>
+  <div class="btn-row">
+    <button class="btn btn-primary" data-icon="shield" onclick="trustProxy()">Trust This Proxy</button>
+    <button class="btn" onclick="showProxyHint('')">Not Now</button>
+  </div>
+</div>
+
 <div id="update-banner" class="update-banner" role="status" hidden>
   <strong id="update-banner-text"></strong>
   <button class="btn btn-primary" data-icon="download" onclick="openUpdates()">View Update</button>
@@ -214,7 +222,7 @@
   </div>
 </div>
 
-<dialog id="users-dialog" class="users-dialog" aria-labelledby="users-title">
+<dialog id="users-dialog" class="panel-dialog" aria-labelledby="users-title">
   <div class="card-head">
     <div>
       <h2 id="users-title">User Management</h2>
@@ -222,10 +230,10 @@
     </div>
     <button type="button" class="btn btn-sm" onclick="usersDialog().close()" aria-label="Close" title="Close">✕</button>
   </div>
-  <p id="users-message" class="users-message" role="status"></p>
+  <p id="users-message" class="panel-message" role="status"></p>
 
   <div id="users-list">
-    <div class="console-input-row users-tools">
+    <div class="console-input-row panel-tools">
       <input type="search" id="users-search" class="form-control" placeholder="Search name, channel, hostmask or account" aria-label="Search users" oninput="renderUsers()">
       <select id="users-role-filter" class="form-control" aria-label="Filter by role" onchange="renderUsers()">
         <option value="">Any role</option>
@@ -234,9 +242,10 @@
         <option value="mod">Mod</option>
         <option value="user">User</option>
       </select>
+      <button type="button" class="btn" data-icon="signin" onclick="openSessions()">Signed In Now</button>
       <button type="button" class="btn btn-primary" data-icon="plus" onclick="openUserForm()">Add User</button>
     </div>
-    <table class="users-table">
+    <table class="data-table">
       <thead>
         <tr>
           <th data-sort="username"><button type="button" onclick="sortUsers('username')">Username</button></th>
@@ -249,6 +258,19 @@
       <tbody id="users-rows"></tbody>
     </table>
     <p id="users-count" class="hint"></p>
+  </div>
+
+  <div id="users-sessions" hidden>
+    <h3 style="margin-bottom: 4px;">Signed In Now</h3>
+    <p class="hint">Browsers signed in to this panel, and people logged in to the bot on IRC.</p>
+    <div class="btn-row" style="margin-bottom: 12px;">
+      <button type="button" class="btn" data-icon="undo" onclick="showUserList()">Back to Users</button>
+      <button type="button" class="btn" data-icon="refresh" onclick="loadSessions()">Refresh</button>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>User</th><th>Where</th><th>Signed In As</th><th>Idle</th><th>Actions</th></tr></thead>
+      <tbody id="session-rows"></tbody>
+    </table>
   </div>
 
   <form id="users-form" onsubmit="saveUserAccount(); return false;" hidden>
@@ -648,12 +670,41 @@
   </div>
 </div>
 
+<dialog id="channel-dialog" class="panel-dialog" aria-labelledby="channel-title">
+  <div class="card-head">
+    <div>
+      <h2 id="channel-title">Channel</h2>
+      <p id="channel-info" class="hint" style="margin-bottom:0;"></p>
+    </div>
+    <button type="button" class="btn btn-sm" onclick="channelDialog().close()" aria-label="Close" title="Close">✕</button>
+  </div>
+  <p id="channel-message" class="panel-message" role="status"></p>
+  <div class="btn-row" style="margin-bottom: 14px;">
+    <button type="button" class="btn" data-icon="refresh" onclick="loadChannel()">Refresh</button>
+  </div>
+  <h3 style="margin-bottom: 4px;">Bans and Mutes</h3>
+  <p class="hint">The ones the bot has set here.</p>
+  <table class="data-table">
+    <thead><tr><th>Mode</th><th>Set Against</th><th>Time Left</th><th>Actions</th></tr></thead>
+    <tbody id="ban-rows"></tbody>
+  </table>
+  <h3 style="margin: 18px 0 8px;">Members</h3>
+  <input type="search" id="member-search" class="form-control" placeholder="Search nickname or host" aria-label="Search members" style="margin-bottom: 10px;" oninput="renderMembers()">
+  <table class="data-table">
+    <thead><tr><th>Nickname</th><th>Status</th><th>Host</th><th>Actions</th></tr></thead>
+    <tbody id="member-rows"></tbody>
+  </table>
+  <p id="member-count" class="hint"></p>
+</dialog>
+
 <div id="toast" class="alert-toast">Saved!</div>
 
 <script src="/panel_rules.js"></script>
 <script src="/panel_irc.js"></script>
 <script src="/panel_access.js"></script>
 <script src="/panel_users.js"></script>
+<script src="/panel_sessions.js"></script>
+<script src="/panel_channel.js"></script>
 <script src="/panel_logs.js"></script>
 <script src="/panel_wifi.js"></script>
 <script src="/panel_system.js"></script>

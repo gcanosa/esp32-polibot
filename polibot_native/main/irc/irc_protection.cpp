@@ -2,6 +2,7 @@
 #include "irc_client.h"
 #include "irc_internal.h"
 #include "bot_memory.h"
+#include "spam.h"
 #include <algorithm>
 
 static constexpr size_t AKICK_SWEEP = 20;        // removals per look at a channel
@@ -42,18 +43,33 @@ bool IRCClient::check_and_update_dynamic_limit(const std::string& channel) {
     return true;
 }
 
+LineContext IRCClient::line_context(const std::string& channel, const std::string& nick, const std::string& message, bool& is_operator) {
+    const auto settings = g_settings.get();
+    // taken apart before locking: only when somebody wants them counted
+    const std::vector<std::string> words = settings->highlight_action == "off" ? std::vector<std::string>() : name_words(message);
+    LineContext line;
+    is_operator = false;
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    auto it = channels_.find(irc_lower(channel));
+    if (it == channels_.end()) return line;
+    MemberList& members = it->second.members;
+    if (const Member* sender = members.find(nick)) {
+        is_operator = sender->is_operator();
+        line.voiced = sender->has_mode('v');
+    }
+    for (const auto& word : words) {
+        if (!same(word, nick) && members.find(word) && ++line.named >= settings->highlight_nicks) break;
+    }
+    return line;
+}
+
 bool IRCClient::moderate(const std::string& channel, const std::string& nick, const std::string& hostmask, const std::string& message) {
     if (is_report_channel(channel)) return false;
-    if (g_settings.get()->exempt_ops) {
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        auto it = channels_.find(irc_lower(channel));
-        if (it != channels_.end()) {
-            const Member* member = it->second.members.find(nick);
-            if (member && member->is_operator()) return false;
-        }
-    }
+    bool is_operator = false;
+    const LineContext line = line_context(channel, nick, message, is_operator);
+    if (is_operator && g_settings.get()->exempt_ops) return false;
     bool stopped = false;
-    for (const auto& act : guardian_.inspect_message(name_, channel, nick, hostmask, message)) {
+    for (const auto& act : guardian_.inspect_message(name_, channel, nick, hostmask, message, line)) {
         execute_action(act);
         stopped = stopped || act.type == "kick" || act.type == "ban" || act.type == "quiet" || act.type == "lockdown";
     }
@@ -165,6 +181,7 @@ void IRCClient::release_lockdown(const std::string& channel) {
     rules.lockdown = false;
     rules.auto_lockdown = false;
     guardian_.save_channel_config(name_, channel, rules);
+    enforce_locks(channel); // locked modes were left alone meanwhile
 }
 
 void IRCClient::sweep_akicks(const std::string& channel) {
@@ -211,6 +228,27 @@ void IRCClient::lift_expired_bans() {
         g_memory.bans.remove(name_, ban.channel, ban.mode);
         report(ReportKind::moderation, std::string("Time is up: ") + change + " in " + ban.channel + ".");
     }
+}
+
+bool IRCClient::is_mute(const std::string& mode) {
+    const auto cfg = settings();
+    // how this network writes a mute, to tell it apart from a ban
+    const std::string start = cfg->quiet_mode.substr(0, cfg->quiet_mode.find("{mask}"));
+    return start.size() > 1 && start != "+b " && mode.rfind(start, 0) == 0;
+}
+
+std::pair<bool, std::string> IRCClient::lift_ban(const std::string& channel, const std::string& mode) {
+    if (!is_registered()) return {false, "Not connected to " + name_ + "."};
+    if (mode.size() < 2) return {false, "That ban is not on record."};
+    if (!can_act(channel)) {
+        request_ops(channel);
+        return {false, "I am not an operator in " + channel + "."};
+    }
+    if (!g_memory.bans.remove(name_, channel, mode)) return {false, "That ban is not on record."};
+    std::string change = mode;
+    change[0] = '-';
+    send_raw("MODE " + channel + " " + change);
+    return {true, "Lifted " + change + " in " + channel + "."};
 }
 
 void IRCClient::finish_masskick(const std::string& channel) {

@@ -181,6 +181,7 @@ function renderChannelsUI() {
             `<button class="btn btn-primary btn-sm" data-icon="unlock" data-act="unlock">Unlock</button>` :
             `<button class="btn btn-red btn-sm" data-icon="lock" data-act="lock">Lockdown (+mi)</button>`
           }
+          <button class="btn btn-sm" data-icon="users" data-act="members">Members &amp; Bans</button>
           <button class="btn btn-sm" data-icon="zap" data-act="sync">Sync +l</button>
           <button class="btn btn-red btn-sm ch-remove" data-icon="trash" data-act="remove">Remove</button>
         </div>
@@ -247,6 +248,21 @@ function renderChannelsUI() {
             </select>
           </div>
         </div>
+        <div class="form-group">
+          <label for="${id('ch-topic-en')}">Topic Lock</label>
+          <select id="${id('ch-topic-en')}" class="form-control">
+            <option value="true" ${setting.topic_lock?.enabled ? 'selected' : ''}>Enabled (Put it back)</option>
+            <option value="false" ${!setting.topic_lock?.enabled ? 'selected' : ''}>Disabled</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="${id('ch-modes')}">Mode Lock (empty = none)</label>
+          <input type="text" id="${id('ch-modes')}" class="form-control" value="${esc(setting.mode_lock)}" placeholder="+nt-s" maxlength="24" autocomplete="off">
+        </div>
+        <div class="form-group" style="grid-column: 1 / -1;">
+          <label for="${id('ch-topic')}">Locked Topic</label>
+          <input type="text" id="${id('ch-topic')}" class="form-control" value="${esc(setting.topic_lock?.topic)}" maxlength="390">
+        </div>
         <div class="form-group" style="grid-column: 1 / -1;">
           <label>Forbidden Words in This Channel (comma separated)</label>
           <input type="text" id="${id('ch-words')}" class="form-control" value="${esc((setting.badwords || []).join(', '))}">
@@ -265,6 +281,7 @@ function renderChannelsUI() {
     on('unlock', () => triggerUnlock(net.name, ch));
     on('sync', () => triggerSyncLimit(net.name, ch));
     on('remove', () => removeChannel(net.name, ch));
+    on('members', () => openChannel(net.name, ch));
     on('save', () => saveSingleChannelConfig(net.name, ch, setting));
     renderAccess(card.querySelector('.access'), net.name, ch);
     container.appendChild(card);
@@ -361,8 +378,11 @@ async function saveSingleChannelConfig(network, ch, current) {
     entrymsg: { enabled: field('ch-entry-en').value === 'true', notice: field('ch-entry-notice').value === 'true', message: field('ch-entry-msg').value },
     badwords: splitList(field('ch-words').value),
     auto_op: { default: null, on: true, off: false }[field('ch-auto-op').value],
-    timed_voice: { enabled: field('ch-voice-en').value === 'true', minutes: Number(field('ch-voice-after').value) * Number(field('ch-voice-unit').value) }
+    timed_voice: { enabled: field('ch-voice-en').value === 'true', minutes: Number(field('ch-voice-after').value) * Number(field('ch-voice-unit').value) },
+    topic_lock: { enabled: field('ch-topic-en').value === 'true', topic: field('ch-topic').value },
+    mode_lock: field('ch-modes').value.trim()
   };
+  if (config.topic_lock.enabled && !config.topic_lock.topic && !confirm(`The locked topic of ${ch} is empty: the bot will clear the topic. Save?`)) return;
   const minutes = config.timed_voice.minutes;
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 525600) return alert('Timed voice: enter a whole number, from 1 minute to 365 days.');
   const channelPassword = field('ch-key').value;

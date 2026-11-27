@@ -68,6 +68,15 @@ const IntField INTS[] = {
     {"timed_voice", "keep_days", &S::voice_days, 1, 365},
     {"report", "max_per_minute", &S::report_per_minute, 1, 120},
     {"report", "low_memory_kb", &S::low_memory_kb, 0, 300},
+    {"spam", "highlight_nicks", &S::highlight_nicks, 2, 50},
+    {"spam", "nick_changes", &S::nick_changes, 1, 50},
+    {"spam", "nick_seconds", &S::nick_seconds, 5, 600},
+    {"spam", "presence_count", &S::presence_count, 2, 50},
+    {"spam", "presence_seconds", &S::presence_seconds, 5, 600},
+    {"spam", "presence_minutes", &S::presence_minutes, 0, 525600},
+    {"locks", "reverts_per_minute", &S::lock_reverts, 1, 20},
+    {"health", "stuck_minutes", &S::stuck_minutes, 0, 60},
+    {"alerts", "offline_minutes", &S::alert_offline_minutes, 0, 1440},
 };
 const BoolField BOOLS[] = {
     {"updates", "auto_check", &S::update_auto_check},
@@ -81,6 +90,10 @@ const BoolField BOOLS[] = {
     {"report", "security", &S::report_security},
     {"report", "channel", &S::report_channel},
     {"report", "system", &S::report_system},
+    {"spam", "links_channels", &S::links_channels},
+    {"spam", "links_spare_voiced", &S::links_spare_voiced},
+    {"alerts", "on_fault", &S::alert_faults},
+    {"alerts", "on_low_memory", &S::alert_memory},
 };
 const TextField TEXTS[] = {
     {"moderation", "mask_style", &S::mask_style, "host userhost nick"},
@@ -90,6 +103,19 @@ const TextField TEXTS[] = {
     {"raid", "clone_action", &S::clone_action, "off report kick quiet ban escalate lockdown"},
     {"tell", "delivery", &S::tell_delivery, "private notice channel"},
     {"help", "reply", &S::help_reply, "channel notice"},
+    {"spam", "links_action", &S::links_action, "off report warn kick ban quiet escalate"},
+    {"spam", "links_reason", &S::links_reason, nullptr},
+    {"spam", "links_allowed", &S::links_allowed, nullptr},
+    {"spam", "highlight_action", &S::highlight_action, "off report warn kick ban quiet escalate"},
+    {"spam", "highlight_reason", &S::highlight_reason, nullptr},
+    {"spam", "nick_action", &S::nick_action, "off report kick ban quiet escalate"},
+    {"spam", "nick_reason", &S::nick_reason, nullptr},
+    {"spam", "presence_action", &S::presence_action, "off report kick ban quiet"},
+    {"spam", "presence_reason", &S::presence_reason, nullptr},
+    {"alerts", "url", &S::alert_url, nullptr}, // checked where it is typed (config_checks) and where it is used
+    {"alerts", "format", &S::alert_format, "text json"},
+    {"network", "mdns_name", &S::mdns_name, nullptr},
+    {"network", "trusted_proxies", &S::trusted_proxies, nullptr},
 };
 
 bool is_choice(const char* choices, const std::string& value) {
