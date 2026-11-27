@@ -348,7 +348,7 @@ static void crash_log() {
 
 static void mdns() {
     const uint8_t ip[4] = {192, 168, 1, 5};
-    uint8_t out[160];
+    uint8_t out[192];
     auto query = [](const std::string& host, uint16_t type = 1, uint16_t klass = 1, uint16_t flags = 0) {
         std::vector<uint8_t> q = {0x12, 0x34, uint8_t(flags >> 8), uint8_t(flags), 0, 1, 0, 0, 0, 0, 0, 0};
         q.push_back(host.size());
@@ -361,12 +361,19 @@ static void mdns() {
         return mdns_reply(q.data(), q.size(), "polibot", ip, legacy, out, room);
     };
     MdnsReply r = ask(query("PoliBot"));
-    assert(r.length == 12 + 15 + 14 && !r.unicast && out[0] == 0 && out[2] == 0x84 && out[5] == 0 && out[7] == 1);
-    assert(std::memcmp(out + r.length - 4, ip, 4) == 0 && out[12] == 7 && out[29] == 0x80);
+    // the address, and with it that there is no other kind
+    assert(r.length == 12 + 29 + 43 && !r.unicast && out[0] == 0 && out[2] == 0x84 && out[5] == 0 && out[7] == 1 && out[11] == 1);
+    assert(std::memcmp(out + 12 + 25, ip, 4) == 0 && out[12] == 7 && out[29] == 0x80);
+    // asked for an IPv6 address: only an NSEC record (47) whose list holds A alone
+    r = ask(query("polibot", 28));
+    assert(r.length == 12 + 43 && out[7] == 1 && out[11] == 0 && out[28] == 47 && std::memcmp(out + r.length - 3, "\0\x01\x40", 3) == 0);
+    assert(std::memcmp(out + 12, out + 12 + 25, 15) == 0);
     assert(ask(query("polibot", 255, 0x8001)).unicast);
     r = ask(query("polibot"), true);
-    assert(r.length == 12 + 19 + 15 + 14 && r.unicast && out[0] == 0x12 && out[1] == 0x34 && out[5] == 1);
-    assert(!ask(query("other")).length && !ask(query("polibo")).length && !ask(query("polibot", 28)).length);
+    assert(r.length == 12 + 19 + 29 && r.unicast && out[0] == 0x12 && out[1] == 0x34 && out[5] == 1 && out[7] == 1 && out[11] == 0);
+    r = ask(query("polibot", 28), true); // an ordinary resolver: its question back, and no answer
+    assert(r.length == 12 + 19 && r.unicast && out[7] == 0 && out[28] == 28);
+    assert(!ask(query("other")).length && !ask(query("polibo")).length && !ask(query("other", 28)).length);
     assert(!ask(query("polibot", 1, 1, 0x8400)).length && !ask(query("polibot"), false, 20).length);
     auto cut = query("polibot");
     for (size_t n = 0; n < cut.size(); n++) assert(!mdns_reply(cut.data(), n, "polibot", ip, false, out, sizeof(out)).length);
@@ -375,6 +382,15 @@ static void mdns() {
     two[5] = 2;
     for (char b : std::string("\x07polibot\xc0\x12\0\x01\0\x01", 14)) two.push_back(b);
     assert(ask(two).length);
+    // both kinds asked at once, the IPv6 one first: the address is what is answered
+    auto both = query("polibot", 28);
+    both[5] = 2;
+    for (char b : std::string("\xc0\x0c\0\x01\0\x01", 6)) both.push_back(b);
+    assert(ask(both).length == 12 + 29 + 43);
+    // the longest name fits
+    const std::string longest(32, 'a');
+    const auto q = query(longest);
+    assert(mdns_reply(q.data(), q.size(), longest, ip, false, out, sizeof(out)).length == 12 + 54 + 93);
     const std::vector<uint8_t> loop = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xc0, 12, 0, 1, 0, 1}; // points at itself
     assert(!ask(loop).length);
     assert(valid_host_name("poli-bot2") && !valid_host_name("") && !valid_host_name("a.local") && !valid_host_name("-a") && !valid_host_name(std::string(33, 'a')));

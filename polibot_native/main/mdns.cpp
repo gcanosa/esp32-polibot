@@ -43,7 +43,7 @@ void serve(int fd) {
             joined = ip;
             joined_at = now;
         }
-        uint8_t query[512], answer[160];
+        uint8_t query[512], answer[192];
         sockaddr_in from = {};
         socklen_t from_length = sizeof(from);
         const int n = recvfrom(fd, query, sizeof(query), 0, reinterpret_cast<sockaddr*>(&from), &from_length); // 2 s at most

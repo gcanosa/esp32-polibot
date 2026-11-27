@@ -1,6 +1,6 @@
 #pragma once
 
-// Just enough multicast DNS to answer "what is the address of <name>.local?"
+// Just enough multicast DNS to answer "what is the address of <name>.local?", and to say it has no other kind
 #include <cstddef>
 #include <cstdint>
 #include <string>
