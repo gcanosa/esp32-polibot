@@ -41,6 +41,7 @@ esp_err_t WebServer::api_login_handler(httpd_req_t* req) {
     UserAccount user;
     if (g_security_mgr.authenticate(uname, pw, user)) {
         std::string token = g_security_mgr.create_web_session(user.username);
+        g_irc_manager.report(ReportKind::security, "Web panel: " + user.username + " (" + user.global_role + ") signed in from " + address + ".");
         cJSON* res = cJSON_CreateObject();
         cJSON_AddStringToObject(res, "status", "ok");
         cJSON_AddStringToObject(res, "token", token.c_str());

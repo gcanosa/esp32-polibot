@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- A successful sign-in to the web panel is reported on the report channel as a security report, with the account, its role and the address.
+
 ## 0.2.0 - 2026-11-27
 
 ### Added
