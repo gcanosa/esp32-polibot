@@ -23,11 +23,12 @@ esp_err_t WebServer::api_users_get_handler(httpd_req_t* req) {
         }
         cJSON_AddItemToObject(item, "channel_roles", cr);
 
-        cJSON* masks = cJSON_CreateArray();
+        cJSON* masks = cJSON_AddArrayToObject(item, "hostmasks");
+        cJSON* trusted = cJSON_AddArrayToObject(item, "trusted_hostmasks"); // recognised without a password
         for (const auto& m : u.hostmasks) {
             cJSON_AddItemToArray(masks, cJSON_CreateString(m.c_str()));
+            if (mask_names_host(m)) cJSON_AddItemToArray(trusted, cJSON_CreateString(m.c_str()));
         }
-        cJSON_AddItemToObject(item, "hostmasks", masks);
         cJSON* accounts = cJSON_AddArrayToObject(item, "accounts");
         for (const auto& a : u.accounts) cJSON_AddItemToArray(accounts, cJSON_CreateString(a.c_str()));
         cJSON_AddItemToArray(arr, item);

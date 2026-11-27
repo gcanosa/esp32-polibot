@@ -4,6 +4,15 @@
 
 ### Added
 - A successful sign-in to the web panel is reported on the report channel as a security report, with the account, its role and the address.
+- **Manage Users** under **Admin & Users** opens a table of the accounts, with a colour for each role, how the bot recognises each one without a password, search, a role filter and sorting.
+
+### Changed
+- Channel roles are entered one row each, instead of as one line of text.
+
+### Fixed
+- Saving a new account under an existing username replaced that account; it is refused now.
+- The role of the account edited last stayed selected for the next new one.
+- A channel role typed without a colon was dropped, which could remove the roles the account already had.
 
 ## 0.2.0 - 2026-11-27
 

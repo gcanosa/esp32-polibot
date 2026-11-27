@@ -448,7 +448,7 @@ You can send commands directly in guarded channels using the configured prefix (
 - `/msg PoliBOT logout` — Terminate your authenticated session.
 - `/msg PoliBOT whoami` — Display your active identity and global/channel permissions.
 
-**Who is trusted.** Permissions (including auto-op for admins, and exemption from flood/word filters) require one of three things: a password `login`; a hostmask that names a host, such as `*!alice@home.example.org` or `*!*@home.example.org` (a mask without one, like `*!*@*`, `alice!*@*` or `*!alice@*`, only allows logging in, since anyone can choose a nickname or ident); or a **services account** listed on the bot user as `network/account` (**Admin & Users**). A login lasts while your nick and hostmask stay the same.
+**Who is trusted.** Permissions (including auto-op for admins, and exemption from flood/word filters) require one of three things: a password `login`; a hostmask that names a host, such as `*!alice@home.example.org` or `*!*@home.example.org` (a mask without one, like `*!*@*`, `alice!*@*` or `*!alice@*`, only allows logging in, since anyone can choose a nickname or ident); or a **services account** listed on the bot user as `network/account` (**Admin & Users > Manage Users**). A login lasts while your nick and hostmask stay the same.
 
 **Services accounts.** Someone signed in to NickServ (or SASL) with a listed account on that network is that user, without a bot password. This needs a server that offers `account-tag` or `account-notify`; **IRC Settings** shows whether it does. With only `account-notify`, accounts of people already present need WHOX. Account changes made in the panel apply at once. Owner actions that need a password (`admin` changes, `ota`) still need `login`.
 

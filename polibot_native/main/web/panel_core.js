@@ -84,6 +84,7 @@ function sessionExpired() {
   localStorage.removeItem('polibot_token');
   currentUser = null;
   document.getElementById('user-profile-badge').innerText = 'Not signed in';
+  document.getElementById('users-dialog').close(); // it would cover the sign-in form
   document.getElementById('login-modal').style.display = 'flex';
 }
 

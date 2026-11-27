@@ -205,55 +205,95 @@
       <div>
         <h3>User Accounts & Role Permissions</h3>
         <p style="font-size: 0.82rem; color: var(--dim); margin-top: 4px;">
-          Manage administrators, moderators, and users with salted SHA-256 password security and per-channel roles.
+          Owners, administrators, moderators and users, with their roles in each channel.
         </p>
       </div>
-      <button class="btn" data-icon="refresh" onclick="loadUsers()">Reload Users</button>
+      <button id="users-open" class="btn btn-primary" data-icon="users" onclick="openUsers()">Manage Users</button>
     </div>
-    <div id="user-list-container"></div>
-    <hr style="border-color: var(--border); margin: 20px 0;">
-    <h4 style="font-size: 1rem; margin-bottom: 12px;">Add or Update User Account</h4>
-    <div class="form-grid">
-      <div class="form-group">
-        <label>Username</label>
-        <input type="text" id="usr-name" class="form-control" placeholder="e.g. alice">
-      </div>
-      <div class="form-group">
-        <label>Password (Salted SHA-256)</label>
-        <input type="password" id="usr-pwd" class="form-control" placeholder="Enter password (leave blank to keep unchanged)">
-      </div>
-      <div class="form-group">
-        <label>Global Role</label>
-        <select id="usr-global-role" class="form-control">
-          <option value="user">User (Normal)</option>
-          <option value="mod">Moderator (Global)</option>
-          <option value="admin">Administrator (Global)</option>
-          <option value="owner">Owner (Full Device Access)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Per-Channel Roles (e.g. #polibot: mod, #chat: admin)</label>
-        <input type="text" id="usr-chan-roles" class="form-control" placeholder="#chan1: mod, SekurNet/#chan2: admin">
-      </div>
-      <div class="form-group" style="grid-column: 1 / -1;">
-        <label>Allowed Hostmasks (comma separated)</label>
-        <input type="text" id="usr-hostmasks" class="form-control" value="*!*@*" placeholder="*!*@*, *!alice@*.org">
-        <p style="font-size:0.78rem; color:var(--dim); margin-top:6px;">
-          A mask naming a host, e.g. <code>*!alice@home.example.org</code> or <code>*!*@home.example.org</code>, is trusted <strong>without a password</strong> (auto-op for admins).
-          With any other, such as <code>*!*@*</code> or <code>*!alice@*</code>, the user must log in (<code>/msg bot login &lt;password&gt;</code>): anyone can choose a nickname or ident.
-        </p>
-      </div>
-      <div class="form-group" style="grid-column: 1 / -1;">
-        <label for="usr-accounts">Services Accounts (network/account, comma separated)</label>
-        <input type="text" id="usr-accounts" class="form-control" placeholder="SekurNet/alice">
-        <p style="font-size:0.78rem; color:var(--dim); margin-top:6px;">
-          Whoever is signed in to services (NickServ) with this account on that network is this user, <strong>without a password in the bot</strong>. Works where the server reports accounts (see IRC Settings).
-        </p>
-      </div>
-    </div>
-    <button class="btn btn-primary" data-icon="save" onclick="saveUserAccount()">Save User Account</button>
+    <div id="user-summary" class="hint"></div>
   </div>
 </div>
+
+<dialog id="users-dialog" class="users-dialog" aria-labelledby="users-title">
+  <div class="card-head">
+    <div>
+      <h2 id="users-title">User Management</h2>
+      <p class="hint" style="margin-bottom:0;">Who may command the bot, and what each one may do.</p>
+    </div>
+    <button type="button" class="btn btn-sm" onclick="usersDialog().close()" aria-label="Close" title="Close">✕</button>
+  </div>
+  <p id="users-message" class="users-message" role="status"></p>
+
+  <div id="users-list">
+    <div class="console-input-row users-tools">
+      <input type="search" id="users-search" class="form-control" placeholder="Search name, channel, hostmask or account" aria-label="Search users" oninput="renderUsers()">
+      <select id="users-role-filter" class="form-control" aria-label="Filter by role" onchange="renderUsers()">
+        <option value="">Any role</option>
+        <option value="owner">Owner</option>
+        <option value="admin">Admin</option>
+        <option value="mod">Mod</option>
+        <option value="user">User</option>
+      </select>
+      <button type="button" class="btn btn-primary" data-icon="plus" onclick="openUserForm()">Add User</button>
+    </div>
+    <table class="users-table">
+      <thead>
+        <tr>
+          <th data-sort="username"><button type="button" onclick="sortUsers('username')">Username</button></th>
+          <th data-sort="role"><button type="button" onclick="sortUsers('role')">Role</button></th>
+          <th>Channel Roles</th>
+          <th>Recognised By</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="users-rows"></tbody>
+    </table>
+    <p id="users-count" class="hint"></p>
+  </div>
+
+  <form id="users-form" onsubmit="saveUserAccount(); return false;" hidden>
+    <h3 id="users-form-title" style="margin-bottom: 12px;">Add User</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="usr-name">Username</label>
+        <input type="text" id="usr-name" class="form-control" placeholder="e.g. alice" autocomplete="off" autocapitalize="none">
+      </div>
+      <div class="form-group">
+        <label for="usr-pwd">Password</label>
+        <input type="password" id="usr-pwd" class="form-control" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label for="usr-global-role">Global Role</label>
+        <select id="usr-global-role" class="form-control"></select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Channel Roles</label>
+      <div id="usr-chan-roles"></div>
+      <datalist id="usr-channel-list"></datalist>
+      <button type="button" class="btn btn-sm" data-icon="plus" style="margin-top:8px;" onclick="addChannelRole()">Add Channel Role</button>
+    </div>
+    <div class="form-group">
+      <label for="usr-hostmasks">Allowed Hostmasks (comma separated)</label>
+      <input type="text" id="usr-hostmasks" class="form-control" placeholder="*!*@*, *!alice@*.org">
+      <p style="font-size:0.78rem; color:var(--dim); margin-top:6px;">
+        A mask naming a host, e.g. <code>*!alice@home.example.org</code> or <code>*!*@home.example.org</code>, is trusted <strong>without a password</strong> (auto-op for admins).
+        With any other, such as <code>*!*@*</code> or <code>*!alice@*</code>, the user must log in (<code>/msg bot login &lt;password&gt;</code>): anyone can choose a nickname or ident.
+      </p>
+    </div>
+    <div class="form-group">
+      <label for="usr-accounts">Services Accounts (network/account, comma separated)</label>
+      <input type="text" id="usr-accounts" class="form-control" placeholder="SekurNet/alice">
+      <p style="font-size:0.78rem; color:var(--dim); margin-top:6px;">
+        Whoever is signed in to services (NickServ) with this account on that network is this user, <strong>without a password in the bot</strong>. Works where the server reports accounts (see IRC Settings).
+      </p>
+    </div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary" data-icon="save">Save User</button>
+      <button type="button" class="btn" data-icon="undo" onclick="showUserList()">Cancel</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Tab: IRC Configuration -->
 <div id="tab-irc" class="tab-content">
