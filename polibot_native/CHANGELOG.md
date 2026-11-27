@@ -8,6 +8,7 @@
 
 ### Changed
 - Channel roles are entered one row each, instead of as one line of text.
+- The foot of the home page shows the author, where to ask and the source code in three labelled columns.
 
 ### Fixed
 - Saving a new account under an existing username replaced that account; it is refused now.
