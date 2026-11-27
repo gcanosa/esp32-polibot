@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 #include <esp_system.h>
 #include "wifi_scan.h"
+#include "update_checker.h"
 #include <esp_app_desc.h>
 
 esp_err_t WebServer::api_system_handler(httpd_req_t* req) {
@@ -63,6 +64,7 @@ esp_err_t WebServer::api_status_handler(httpd_req_t* req) {
 
     cJSON* res = cJSON_CreateObject();
     cJSON_AddStringToObject(res, "version", esp_app_get_description()->version);
+    cJSON_AddStringToObject(res, "update", g_updates.available().c_str()); // a newer version, "" if none is known
     cJSON_AddStringToObject(res, "uptime", up_str);
     cJSON_AddStringToObject(res, "current_time", g_ntp_mgr.get_formatted_time().c_str());
     cJSON_AddBoolToObject(res, "ntp_synced", g_ntp_mgr.is_synced());

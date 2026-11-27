@@ -24,6 +24,12 @@ struct OtaStatus {
     bool requires_reboot = false;
 };
 
+// What a signed release says its image is; size 0 = nothing to compare with (an address the owner typed)
+struct ImageCheck {
+    size_t size = 0;
+    std::string sha256; // lower case hexadecimal
+};
+
 class OtaManager {
 public:
     OtaManager();
@@ -48,7 +54,8 @@ public:
     // URL-based OTA (HTTP / HTTPS background download task)
     bool start_url_update(const std::string& url,
                           std::function<void(bool success, const std::string& msg)> on_complete = nullptr,
-                          std::function<void(int percent, size_t read_bytes, size_t total_bytes)> on_progress = nullptr);
+                          std::function<void(int percent, size_t read_bytes, size_t total_bytes)> on_progress = nullptr,
+                          const ImageCheck* expected = nullptr); // installed only if the download matches it
 
     bool is_in_progress() const { return in_progress_; }
 
@@ -68,6 +75,7 @@ private:
     void run_url_ota();
 
     std::string task_url_;
+    ImageCheck task_expected_;
     std::function<void(bool, const std::string&)> task_on_complete_;
     std::function<void(int, size_t, size_t)> task_on_progress_;
 };

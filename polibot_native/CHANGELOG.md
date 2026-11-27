@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - 2026-11-27
+
+### Added
+- **Online Updates** under Firmware & Backup: looks for newer releases at `gcanosa/esp32-polibot` on **Check Now**, or by itself every so many hours (off by default), shows a notice in the panel and installs on request.
+- Releases are signed. One is offered only with the project's signature, and installed only if the download is the very image that was signed.
+- The home page links to the source code and downloads.
+
 ## 0.1.5 - 2026-11-26
 
 First public release, on GitHub as `gcanosa/esp32-polibot` under the MIT license.

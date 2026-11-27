@@ -21,6 +21,7 @@
 #include "bot_memory.h"
 #include "psram_alloc.h"
 #include "health.h"
+#include "update_checker.h"
 
 static const char* TAG = "MAIN";
 
@@ -78,6 +79,7 @@ static void heartbeat_task(void* pv) {
         }
         save_memory(false);
         check_memory();
+        g_updates.tick();
     }
 }
 

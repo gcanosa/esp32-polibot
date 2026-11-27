@@ -160,6 +160,7 @@ async function fetchStatus(poll = false) {
     document.getElementById('wifi-status').innerText = (wifi.connected ? `Connected. IP address: ${wifi.ip}` : 'Not connected to a WiFi network.')
       + (wifi.ap_active ? ' The setup access point is open at 192.168.4.1.' : '');
     showLed(latestStatus.led);
+    showUpdateBanner(latestStatus.update);
     showReportStatus();
     document.getElementById('stat-uptime').innerText = latestStatus.uptime;
     document.getElementById('stat-ram').innerText = latestStatus.free_ram;

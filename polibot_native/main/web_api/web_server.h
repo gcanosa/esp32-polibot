@@ -9,7 +9,7 @@
 constexpr int MAX_CONFIG_BODY = 96 * 1024; // a full configuration or backup
 
 // The panel's server. Its source files, by subject: web_server (routes, pages, shared helpers),
-// api_session, api_status, api_users, api_config, api_action, api_access, api_backup, api_ota.
+// api_session, api_status, api_users, api_config, api_action, api_access, api_backup, api_ota, api_update.
 class WebServer {
 public:
     WebServer(ConfigManager& config_mgr, SecurityManager& security_mgr, IRCManager& irc_mgr);
@@ -58,6 +58,8 @@ private:
     static esp_err_t api_ota_status_handler(httpd_req_t* req);
     static esp_err_t api_ota_upload_handler(httpd_req_t* req);
     static esp_err_t api_ota_url_handler(httpd_req_t* req);
+    static esp_err_t api_update_get_handler(httpd_req_t* req);
+    static esp_err_t api_update_post_handler(httpd_req_t* req);
     static esp_err_t api_backup_handler(httpd_req_t* req);
     static esp_err_t api_restore_handler(httpd_req_t* req);
 };

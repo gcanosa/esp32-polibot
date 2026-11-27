@@ -29,6 +29,7 @@ data = open(path, 'rb').read()
 print(json.dumps({'version': version, 'board': 'esp32s3-n16r8', 'file': os.path.basename(path),
                   'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'notes': notes}, indent=1))
 PY
+[ "$(wc -c < firmware/latest.json)" -le 2048 ] || { echo "latest.json is over the 2048 bytes devices accept: shorten the notes" >&2; exit 1; }
 openssl dgst -sha256 -sign "$KEY" -out firmware/latest.json.sig firmware/latest.json
 openssl dgst -sha256 -verify "$PUB" -signature firmware/latest.json.sig firmware/latest.json
 cat firmware/latest.json

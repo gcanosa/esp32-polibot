@@ -1,6 +1,6 @@
 # PoliBOT Sentry - ESP32-S3 Native C/C++ Firmware (ESP-IDF)
 
-Current version: **0.1.5** (see [CHANGELOG.md](CHANGELOG.md)). Target board: **ESP32-S3-DevKitC-1 with WROOM-1-N16R8** (16 MB flash, 8 MB octal PSRAM).
+Current version: **0.2.0** (see [CHANGELOG.md](CHANGELOG.md)). Target board: **ESP32-S3-DevKitC-1 with WROOM-1-N16R8** (16 MB flash, 8 MB octal PSRAM).
 
 High-performance, hardware-accelerated C/C++ firmware: **PoliBOT Sentry**, engineered for the **ESP32-S3** microcontroller.
 
@@ -48,6 +48,7 @@ and `web/` (the pages). Large or rarely used data is kept in PSRAM.
 | **Memory** | `main/memory/` | `seen`, `tell`, placed bans and earned voice, saved in the settings partition. |
 | **Bot Settings** | `main/bot_settings.*` | Every behaviour setting described once: loading, ranges and the panel's values. |
 | **OTA Manager** | `main/ota_manager.cpp`, `.h` | Dual-slot firmware updates by web upload or URL download, with automatic rollback. |
+| **Update Checker** | `main/update_checker.cpp`, `logic/releases.*` | Signed online releases: check, notice and upgrade. |
 | **NTP Manager** | `main/ntp_manager.cpp`, `.h` | SNTP synchronization and POSIX timezone handling. |
 | **Web Server & UI** | `main/web_api/`, `main/web/` | Built-in `esp_http_server` serving the embedded dashboard (`index.html`, `panel.css`, `panel_*.js`) and its REST APIs. |
 | **Display Hook** | `main/display_interface.cpp`, `.h` | Modular C++ interface ready for attaching a color SPI TFT screen (ST7789, ILI9341, GC9A01) via DMA. |
@@ -381,7 +382,7 @@ The version number lives in `version.txt`. For each release: change it, add an e
 
 ```text
 /ctcp PoliBOT VERSION
-PoliBOT v0.1.5 - Running on ESP32-S3 (2 cores @ 240 MHz, 16 MB flash) - ESP-IDF v5.2.2
+PoliBOT v0.2.0 - Running on ESP32-S3 (2 cores @ 240 MHz, 16 MB flash) - ESP-IDF v5.2.2
 ```
 
 ---
@@ -407,6 +408,7 @@ All update methods require an **owner** account. The file to send is the applica
 
 | Method | How |
 | :--- | :--- |
+| Online | **Firmware & Backup > Online Updates** (see below). |
 | Web upload | **Firmware & Backup** tab, choose the `.bin`, click **Upload & Flash**. |
 | Web URL | **Firmware & Backup** tab, paste a direct `.bin` link, click **Download & Flash**. |
 | IRC | `/msg PoliBOT login <password>` then `/msg PoliBOT ota <url>`; `ota status` shows progress. |
@@ -419,6 +421,12 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @build/polibot_native.bin h
 ```
 
 REST endpoints: `GET /api/ota/status`, `POST /api/ota/upload` (raw binary body), `POST /api/ota/url` (`{"url": "..."}`).
+
+### Online Updates
+
+**Check Now** reads the release list in this repository (`firmware/latest.json`). **Check automatically** (off by default) does so two minutes after a start and then every so many hours (24 by default, 1 to 720); a check that fails is tried again after 15 minutes. A newer release is announced by a notice at the top of the panel and once in the event log, and **Upgrade** installs it. API (owner): `GET /api/update`; `POST /api/update` with `{"action":"check"}`, `{"action":"install"}` or `{"auto_check":true,"check_hours":24}`.
+
+The device offers a release only if the list carries a signature made with the key in `main/update_key.pem`, names this board and is newer than the running version, and it installs the download only if its size and SHA-256 are the signed ones. Uploading a file or giving an address yourself needs no signature, so your own builds install as before. A fork that publishes its own releases changes the address in `main/update_checker.cpp` and the key. Certificate expiry dates are not checked; the signature is what protects the update. A check sends nothing about the device beyond an ordinary web request.
 
 **Rollback protection.** A newly installed image must run for 30 seconds with the network up and the web panel started before it is kept. If it crashes, is reset, or loses power before that, the bootloader returns to the previous firmware. Further updates are refused during that window.
 

@@ -15,6 +15,7 @@ idf_component_register(
         "led_driver.cpp"
         "system_info.cpp"
         "health.cpp"
+        "update_checker.cpp"
         # logic: no ESP-IDF, tested on a PC
         "logic/access_list.cpp"
         "logic/account_book.cpp"
@@ -25,6 +26,7 @@ idf_component_register(
         "logic/rate_limits.cpp"
         "logic/members.cpp"
         "logic/outbox.cpp"
+        "logic/releases.cpp"
         # memory: seen, tell, bans
         "memory/ban_list.cpp"
         "memory/bot_memory.cpp"
@@ -67,11 +69,13 @@ idf_component_register(
         "web_api/api_ota.cpp"
         "web_api/api_session.cpp"
         "web_api/api_status.cpp"
+        "web_api/api_update.cpp"
         "web_api/api_users.cpp"
         "web_api/config_checks.cpp"
     INCLUDE_DIRS "." "logic" "memory" "irc" "web_api"
     EMBED_TXTFILES "web/index.html" "web/home.html" "web/panel.css" "web/panel_core.js" "web/panel_irc.js"
-                   "web/panel_rules.js" "web/panel_users.js" "web/panel_system.js" "web/panel_logs.js" "web/panel_wifi.js" "web/panel_access.js" "web/ui.css" "web/theme.js"
+                   "web/panel_rules.js" "web/panel_users.js" "web/panel_system.js" "web/panel_logs.js" "web/panel_wifi.js" "web/panel_access.js" "web/panel_update.js" "web/ui.css" "web/theme.js"
+                   "update_key.pem"
     EMBED_FILES "web/logo.webp" "web/board.webp"
     REQUIRES
         esp_wifi

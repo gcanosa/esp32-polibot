@@ -26,6 +26,7 @@ EMBEDDED(panel_system_js);
 EMBEDDED(panel_logs_js);
 EMBEDDED(panel_wifi_js);
 EMBEDDED(panel_access_js);
+EMBEDDED(panel_update_js);
 
 namespace {
 
@@ -54,6 +55,7 @@ const Asset ASSETS[] = {
     {"/panel_logs.js", JS, panel_logs_js_start, panel_logs_js_end, true},
     {"/panel_wifi.js", JS, panel_wifi_js_start, panel_wifi_js_end, true},
     {"/panel_access.js", JS, panel_access_js_start, panel_access_js_end, true},
+    {"/panel_update.js", JS, panel_update_js_start, panel_update_js_end, true},
     {"/theme.js", JS, theme_js_start, theme_js_end, true},
     {"/logo.webp", "image/webp", logo_webp_start, logo_webp_end, false},
     {"/board.webp", "image/webp", board_webp_start, board_webp_end, false},
@@ -175,6 +177,8 @@ bool WebServer::start(int port) {
         {.uri = "/api/ota/status", .method = HTTP_GET, .handler = api_ota_status_handler, .user_ctx = nullptr},
         {.uri = "/api/ota/upload", .method = HTTP_POST, .handler = api_ota_upload_handler, .user_ctx = nullptr},
         {.uri = "/api/ota/url", .method = HTTP_POST, .handler = api_ota_url_handler, .user_ctx = nullptr},
+        {.uri = "/api/update", .method = HTTP_GET, .handler = api_update_get_handler, .user_ctx = nullptr},
+        {.uri = "/api/update", .method = HTTP_POST, .handler = api_update_post_handler, .user_ctx = nullptr},
     };
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();

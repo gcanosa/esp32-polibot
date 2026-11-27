@@ -52,6 +52,7 @@ const IntField INTS[] = {
     {"raid", "clone_seconds", &S::clone_seconds, 1, 600},
     {"raid", "clone_min_length", &S::clone_min_length, 1, 400},
     // the "seen" and "tell" ceilings keep both lists within the 512 KB settings partition
+    {"updates", "check_hours", &S::update_check_hours, 1, 720},
     {"channel_limit", "interval_seconds", &S::limit_interval_seconds, 5, 600},
     {"channel_limit", "grace_seconds", &S::limit_grace_seconds, 0, 3600},
     {"channel_limit", "slack", &S::limit_slack, 0, 50},
@@ -69,6 +70,7 @@ const IntField INTS[] = {
     {"report", "low_memory_kb", &S::low_memory_kb, 0, 300},
 };
 const BoolField BOOLS[] = {
+    {"updates", "auto_check", &S::update_auto_check},
     {"ops", "request", &S::request_ops},
     {"moderation", "exempt_channel_ops", &S::exempt_ops},
     {"seen", "enabled", &S::seen_enabled},

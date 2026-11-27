@@ -39,7 +39,9 @@ Then:
 
 ## Update
 
-In the control panel, open **Firmware & Backup**, choose `polibot-<version>-update.bin` and upload it. Settings and accounts are kept.
+From version 0.2.0 the control panel does it for you: **Firmware & Backup > Online Updates > Check Now**, or switch on the automatic check. Releases are signed, and the board installs only what carries the project's signature.
+
+From an earlier version, or to choose a file yourself: open **Firmware & Backup**, choose `polibot-<version>-update.bin` and upload it. Either way, settings and accounts are kept.
 
 ## Documentation
 

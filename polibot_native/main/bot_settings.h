@@ -68,6 +68,9 @@ struct BotSettings {
     // "timed_voice": the memory of it (the waiting time is set per channel)
     int voice_max = 500;
     int voice_days = 90; // forgotten after this long without being seen
+    // "updates": looking for newer releases (Firmware & Backup)
+    bool update_auto_check = false;
+    int update_check_hours = 24;
     // "report"
     bool report_moderation = true;
     bool report_raid = true;

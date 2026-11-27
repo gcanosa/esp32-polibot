@@ -7,7 +7,10 @@
 #include <esp_http_client.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <mbedtls/sha256.h>
+#include <algorithm>
 #include <cstring>
+#include <vector>
 
 static const char* TAG = "OTA";
 
@@ -201,6 +204,26 @@ void OtaManager::abort_stream_update() {
 // URL-based OTA (HTTP / HTTPS Background Task)
 // -------------------------------------------------------------
 
+// Reads the new image back from flash: it must be the very one that was signed
+static bool downloaded_as_expected(const ImageCheck& expected, int length) {
+    const esp_partition_t* part = esp_ota_get_next_update_partition(NULL);
+    if (!part || length < 0 || static_cast<size_t>(length) != expected.size || expected.size > part->size) return false;
+    std::vector<unsigned char> block(4096);
+    unsigned char hash[32];
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    bool ok = mbedtls_sha256_starts(&sha, 0) == 0;
+    for (size_t at = 0; ok && at < expected.size; at += block.size()) {
+        const size_t n = std::min(block.size(), expected.size - at);
+        ok = esp_partition_read(part, at, block.data(), n) == ESP_OK && mbedtls_sha256_update(&sha, block.data(), n) == 0;
+    }
+    ok = ok && mbedtls_sha256_finish(&sha, hash) == 0;
+    mbedtls_sha256_free(&sha);
+    char text[65];
+    for (int i = 0; ok && i < 32; i++) snprintf(text + 2 * i, 3, "%02x", hash[i]);
+    return ok && expected.sha256 == text;
+}
+
 void OtaManager::url_ota_task_entry(void* pv) {
     OtaManager* self = static_cast<OtaManager*>(pv);
     self->run_url_ota();
@@ -209,7 +232,8 @@ void OtaManager::url_ota_task_entry(void* pv) {
 
 bool OtaManager::start_url_update(const std::string& url,
                                   std::function<void(bool success, const std::string& msg)> on_complete,
-                                  std::function<void(int percent, size_t read_bytes, size_t total_bytes)> on_progress) {
+                                  std::function<void(int percent, size_t read_bytes, size_t total_bytes)> on_progress,
+                                  const ImageCheck* expected) {
     if (url.empty() || (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0)) {
         if (on_complete) on_complete(false, "Invalid URL (must start with http:// or https://)");
         return false;
@@ -223,6 +247,7 @@ bool OtaManager::start_url_update(const std::string& url,
         }
         in_progress_ = true;
         task_url_ = url;
+        task_expected_ = expected ? *expected : ImageCheck();
         task_on_complete_ = on_complete;
         task_on_progress_ = on_progress;
 
@@ -263,10 +288,12 @@ void OtaManager::run_url_ota() {
     std::string url;
     std::function<void(bool, const std::string&)> on_complete;
     std::function<void(int, size_t, size_t)> on_progress;
+    ImageCheck expected;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
         url = task_url_;
+        expected = task_expected_;
         on_complete = task_on_complete_;
         on_progress = task_on_progress_;
     }
@@ -353,8 +380,13 @@ void OtaManager::run_url_ota() {
         return;
     }
 
+    const char* msg = nullptr;
     if (!esp_https_ota_is_complete_data_received(https_ota_handle)) {
-        const char* msg = "OTA failed: download incomplete";
+        msg = "OTA failed: download incomplete";
+    } else if (expected.size && !downloaded_as_expected(expected, esp_https_ota_get_image_len_read(https_ota_handle))) {
+        msg = "OTA failed: the download does not match the signed release. Nothing was changed.";
+    }
+    if (msg) {
         g_log_buffer.log(msg);
         esp_https_ota_abort(https_ota_handle);
         {

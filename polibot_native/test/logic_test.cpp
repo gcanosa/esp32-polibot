@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdio>
 #include "access_list.h"
+#include "releases.h"
 #include "account_book.h"
 #include "auto_modes.h"
 #include "floating_limit.h"
@@ -265,7 +266,24 @@ static void channel_limit() {
     assert(limit.current == 31);                              // it rests within the slack of what is needed
 }
 
+static void releases() {
+    assert(version_newer("0.2.0", "0.1.5") && version_newer("0.10.0", "0.9.9") && version_newer("1.0", "0.99.99"));
+    assert(version_newer("0.2.0.1", "0.2.0"));
+    assert(!version_newer("0.1.5", "0.1.5") && !version_newer("0.1.4", "0.1.5") && !version_newer("0.2", "0.2.0"));
+    for (const char* bad : {"", "v0.3.0", "0.3.0-rc1", "0..3", ".3", "3.", "1.2.3.4.5", "9999999.0", " 9.0", "9.0 "}) {
+        assert(!version_newer(bad, "0.1.5") && !version_newer("9.9.9", bad));
+    }
+    assert(release_file_name("polibot-0.2.0-update.bin") && release_file_name("a_b.bin"));
+    for (const char* bad : {"", ".bin", "x.txt", "../x.bin", "a/b.bin", "a b.bin", "x.bin?y=1", ".hidden.bin", "http:x.bin", "a\\b.bin"}) {
+        assert(!release_file_name(bad));
+    }
+    assert(!release_file_name(std::string(61, 'a') + ".bin") && release_file_name(std::string(60, 'a') + ".bin"));
+    assert(sha256_text(std::string(64, 'a')) && sha256_text(std::string(64, '0')));
+    assert(!sha256_text(std::string(63, 'a')) && !sha256_text(std::string(65, 'a')) && !sha256_text(std::string(64, 'g')) && !sha256_text(std::string(64, 'A')));
+}
+
 int main() {
+    releases();
     channel_limit();
     access_lists();
     auto_modes();
